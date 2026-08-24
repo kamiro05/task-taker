@@ -92,6 +92,8 @@
           obj.CreateDate != null ? obj.CreateDate :
           obj.createDateMs != null ? obj.createDateMs : 0);
         const tasksStr = firstStr(obj, ["tasks", "Tasks"]);
+        const portalNameVal = firstStr(obj, ["portalName", "PortalName"]) ||
+          ((companyRaw && (companyRaw.portal || companyRaw.Portal)) || "");
         m.set(tid, {
           taskId: tid,
           companyId: cid,
@@ -100,8 +102,7 @@
             idName(/^company:\s*(.+)$/i, cid),
           companyRaw,
           portalId: firstStr(obj, ["portalId", "PortalId"]),
-          portalName: firstStr(obj, ["portalName", "PortalName"]) ||
-            ((companyRaw && (companyRaw.portal || companyRaw.Portal)) || ""),
+          portalName: portalNameVal,
           driverId: did,
           driverName: firstStr(obj, ["driverName", "DriverName"]) ||
             [(driverRaw && driverRaw.firstName), (driverRaw && driverRaw.lastName)].filter(Boolean).join(" ") ||
@@ -126,7 +127,7 @@
         const st = firstStr(obj, ["status", "Status"]);
         const execId = firstStr(obj, ["executorUserId", "ExecutorUserId"]);
         if (/not\s*started/i.test(st) && !execId) {
-          post({ id: tid, type: tasksStr });
+          post({ id: tid, type: tasksStr, portal: String(portalNameVal || "").toLowerCase() });
         }
       }
     }
@@ -313,21 +314,246 @@
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Сборка payload InsertTransactions — целиком в MAIN-мире.
+  //
+  // Платформа перед своим POST делает подготовительную цепочку (снято с живого
+  // успешного запроса): компания из Portals, водитель из PortalDrivers, журнал
+  // HOS-событий и daily-логи из FlowProvider. Прежняя версия слала вместо всего
+  // этого «скелет» с пустыми полями и provider = ИМЯ_ПОРТАЛА в верхнем регистре
+  // (для K1 TRANSFREIGHT: "ROYAL" вместо реального "HOS247") — сервер отвечал 504.
+  // Данные здесь весят сотни КБ, поэтому payload строится и отправляется прямо
+  // тут, а не гоняется через postMessage-мост.
+  // ---------------------------------------------------------------------------
+
+  const API_BASE = "https://api.flowconnect-group.com";
+  const PORTALS_TTL_MS = 30 * 60 * 1000;
+  const DRIVERS_TTL_MS = 5 * 60 * 1000;
+
+  let companyMapPromise = null;
+  let companyMapAt = 0;
+  const driversCache = new Map();
+
+  function authToken() {
+    try { return localStorage.getItem("auth") || ""; } catch (e) { return ""; }
+  }
+
+  async function apiGet(path, extraHeaders) {
+    const headers = Object.assign({ Authorization: "Bearer " + authToken() }, extraHeaders || {});
+    // ВАЖНО: без credentials. api.flowconnect-group.com — другой домен, и на
+    // кросс-доменный запрос с куками шлюз мгновенно отвечает 504 (проверено:
+    // тот же URL и токен, с credentials — 504 за ~120 мс, без — 200).
+    // Angular тоже шлёт запросы без кук, авторизация только по Bearer.
+    const r = await fetch(API_BASE + path, { headers });
+    if (!r.ok) throw new Error(path.split("?")[0] + " → HTTP " + r.status);
+    return await r.json();
+  }
+
+  // Portals — единственный источник полного объекта компании (provider, dotNumber,
+  // terminals, portalEmail…). ~3 МБ, поэтому грузится один раз и кешируется.
+  function loadCompanyMap() {
+    if (companyMapPromise && Date.now() - companyMapAt < PORTALS_TTL_MS) return companyMapPromise;
+    companyMapAt = Date.now();
+    companyMapPromise = apiGet("/api/FlowManage/Portals").then((portals) => {
+      const m = new Map();
+      for (const p of (portals || [])) {
+        for (const c of (p.Companies || [])) {
+          const key = c && (c.companyId || c.id || c._id);
+          if (key) m.set(String(key), c);
+        }
+      }
+      return m;
+    }).catch((e) => { companyMapPromise = null; throw e; });
+    return companyMapPromise;
+  }
+
+  async function getMainDriver(rec) {
+    const key = rec.portalId + "|" + rec.companyId;
+    const hit = driversCache.get(key);
+    let users;
+    if (hit && Date.now() - hit.at < DRIVERS_TTL_MS) {
+      users = hit.users;
+    } else {
+      const q = "?PortalId=" + encodeURIComponent(rec.portalId) +
+        "&PortalCompanyId=" + encodeURIComponent(rec.companyId) +
+        "&GetUsers=true&GetVehicles=true&GetLatestDriverStatuses=true";
+      const res = await apiGet("/api/FlowManage/PortalDrivers" + q);
+      users = (res && res.Users) || [];
+      driversCache.set(key, { at: Date.now(), users });
+    }
+    return users.find((u) => u && String(u._id) === String(rec.driverId)) || null;
+  }
+
+  function getProviderToken(rec) {
+    const q = "?PortalId=" + encodeURIComponent(rec.portalId) +
+      "&PortalCompanyId=" + encodeURIComponent(rec.companyId);
+    return apiGet("/api/FlowManage/CompanyAccessToken" + q);
+  }
+
+  function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+  function ymd(d) { return d.getFullYear() + "/" + pad2(d.getMonth() + 1) + "/" + pad2(d.getDate()); }
+
+  // Диапазоны сняты с живого запроса: RangeDate* = последние 8 дней (пресет
+  // «Last 8»), HosEvents берётся на 3 дня шире назад, daily-логи — ровно по Range.
+  function providerData(rec, company, providerToken, bgnStr, endStr, hosStartStr) {
+    const H = { "X-Provider-Token": providerToken };
+    const common = "Provider=" + encodeURIComponent(company.provider || "") +
+      "&CompanyId=" + encodeURIComponent(rec.companyId) +
+      "&DriverId=" + encodeURIComponent(rec.driverId);
+    const evQ = "?" + common + "&StartDate=" + encodeURIComponent(hosStartStr) + "&EndDate=" + encodeURIComponent(endStr);
+    const dlQ = "?" + common + "&StartDate=" + encodeURIComponent(bgnStr) + "&EndDate=" + encodeURIComponent(endStr);
+    const pick = (r) => (r && r.data) || [];
+    return Promise.all([
+      apiGet("/api/FlowProvider/HosEvents" + evQ, H).then(pick).catch(() => []),
+      apiGet("/api/FlowProvider/DailyLog" + dlQ, H).then(pick).catch(() => []),
+      apiGet("/api/FlowProvider/DailyLogSummaries" + dlQ, H).then(pick).catch(() => [])
+    ]);
+  }
+
+  const emptyChanges = () => ({ changesCount: 0, steps: [], changedEvents: [], createdEvents: [], deletedEvents: [] });
+
+  // Одну задачу могут независимо принести два пути: SSE-детект (id = TaskId
+  // платформы) и DOM-детект (id = хеш строки). Их локи в content.js по разным
+  // ключам друг друга не видят, поэтому единственная точка, где оба сходятся с
+  // уже разрешённым TaskId — здесь. Без этого рабочий turbo создаёт ДВЕ
+  // транзакции на одну заявку.
+  const grabInFlight = new Set();
+  const grabDone = new Set();
+
+  async function turboGrab(msg) {
+    const rec = reg().get(String(msg.taskId));
+    if (!rec) return { ok: false, error: "задача не найдена в реестре (" + reg().size + " зап.)" };
+
+    const tid = String(msg.taskId);
+    if (grabDone.has(tid)) return { ok: false, dedup: true, error: "уже захвачена этой вкладкой" };
+    if (grabInFlight.has(tid)) return { ok: false, dedup: true, error: "захват уже идёт" };
+    grabInFlight.add(tid);
+    try {
+      const res = await turboGrabInner(msg, rec);
+      if (res.ok) grabDone.add(tid);
+      return res;
+    } finally {
+      grabInFlight.delete(tid);
+    }
+  }
+
+  async function turboGrabInner(msg, rec) {
+
+    const map = await loadCompanyMap();
+    const company = map.get(String(rec.companyId));
+    if (!company) return { ok: false, error: "компания не найдена в Portals" };
+
+    const now = Date.now();
+    const endStr = ymd(new Date(now));
+    const bgnStr = ymd(new Date(now - 8 * 86400000));
+    const hosStartStr = ymd(new Date(now - 11 * 86400000));
+
+    const providerToken = await getProviderToken(rec);
+    const [mainDriver, provider] = await Promise.all([
+      getMainDriver(rec).catch(() => null),
+      providerData(rec, company, providerToken, bgnStr, endStr, hosStartStr)
+    ]);
+    const [events, dailyLog, dailyLogSum] = provider;
+
+    if (!mainDriver) return { ok: false, error: "водитель не найден в PortalDrivers" };
+
+    const inProc = (msg.portalsInProcess || []).some(
+      (p) => String(p).toLowerCase() === String(rec.portalName || "").toLowerCase()
+    );
+    const rawTypes = (msg.rawTypes && msg.rawTypes.length ? msg.rawTypes : String(rec.tasksStr || "").split(";"))
+      .map((s) => String(s).trim())
+      .filter((s) => s && !/^\+\d+$/.test(s));
+
+    const hist = {
+      otherEvents: [],
+      company,
+      driversInfo: { mainDriver },
+      changes: emptyChanges(),
+      coDriverChanges: emptyChanges(),
+      startData: { events, profile: { dailyLogSum, dailyLog } }
+    };
+
+    const body = JSON.stringify({
+      CompanyId: rec.companyId,
+      CompanyName: rec.companyName,
+      PortalId: rec.portalId,
+      PortalName: rec.portalName,
+      CreateDate: now,
+      LastSyncDate: now,
+      Status: inProc ? "In process" : "Not started",
+      RangeDateBgn: bgnStr,
+      RangeDateEnd: endStr,
+      DriverId: rec.driverId,
+      DriverName: rec.driverName,
+      TotalChanges: 0,
+      ChangedDays: "",
+      TransactionHistory: JSON.stringify(hist),
+      TaskId: rec.taskId,
+      CreateTask: true,
+      TaskSource: rec.source || "",
+      VehicleId: rec.vehicleId || "",
+      VehicleName: rec.vehicleName || "",
+      Grade: rec.grade != null && rec.grade !== "" ? (Number(rec.grade) || 0) : 0,
+      LastChangeTime: now,
+      Tasks: rawTypes.join(";")
+    });
+
+    const r = await fetch(API_BASE + "/api/FlowDashBoard/InsertTransactions", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + authToken(), "Content-Type": "application/json" },
+      body
+    });
+    if (!r.ok) {
+      let t = "";
+      try { t = (await r.text()).slice(0, 200); } catch (e) {}
+      return { ok: false, status: r.status, error: "HTTP " + r.status + (t ? " — " + t : ""), events: events.length };
+    }
+    return { ok: true, status: r.status, events: events.length };
+  }
+
+  // Прогреваем кеш компаний заранее, чтобы на захвате не платить за 3 МБ.
+  setTimeout(() => { loadCompanyMap().catch(() => {}); }, 4000);
+
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     const msg = event.data;
-    if (!msg || msg.__fct !== true || msg.kind !== "turbo-req") return;
+    if (!msg || msg.__fct !== true) return;
+
+    if (msg.kind === "turbo-grab") {
+      turboGrab(msg)
+        .then((res) => {
+          window.postMessage(Object.assign({ __fct: true, kind: "turbo-res", reqId: msg.reqId }, res), "*");
+        })
+        .catch((err) => {
+          window.postMessage({
+            __fct: true, kind: "turbo-res", reqId: msg.reqId,
+            ok: false, error: String((err && err.message) || err).slice(0, 200)
+          }, "*");
+        });
+      return;
+    }
+
+    if (msg.kind !== "turbo-req") return;
 
     if (msg.sig) {
       let rec = null;
       let size = 0;
-      try { rec = lookupBySig(msg.sig); size = reg().size; } catch (e) {}
+      try {
+        size = reg().size;
+        if (msg.taskId) rec = reg().get(String(msg.taskId)) || null;
+        // Пустая сигнатура (id-путь без DOM-строки) не даёт lookupBySig ничего
+        // осмысленного сравнивать — пропускаем фаззи-фолбэк, чтобы не подставить
+        // случайную первую запись реестра вместо "не найдено".
+        if (!rec && (msg.sig.c || msg.sig.d || msg.sig.tk)) rec = lookupBySig(msg.sig);
+      } catch (e) {}
       window.postMessage({ __fct: true, kind: "turbo-res", reqId: msg.reqId, found: !!rec, rec, regSize: size }, "*");
       return;
     }
 
     const opts = msg.options || {};
-    const init = { method: opts.method || "POST", credentials: "include" };
+    // credentials намеренно не задаём — см. комментарий у apiGet: куки на
+    // кросс-доменный API дают мгновенный 504.
+    const init = { method: opts.method || "POST" };
     if (opts.headers) init.headers = opts.headers;
     try {
       const tok = localStorage.getItem("auth") || "";

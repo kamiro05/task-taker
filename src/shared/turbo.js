@@ -1,5 +1,9 @@
 globalThis.FCT = globalThis.FCT || {};
 
+// Тонкий клиент turbo-захвата. Вся сборка payload живёт в MAIN-мире
+// (src/injected/inject.js): ей нужны компания из Portals, водитель из
+// PortalDrivers и журнал HOS-событий — сотни КБ, которые бессмысленно гонять
+// через postMessage-мост. Здесь остаётся только запрос-ответ.
 FCT.Turbo = (function () {
   let seq = 0;
   const pending = new Map();
@@ -33,7 +37,7 @@ FCT.Turbo = (function () {
       }, timeoutMs || 6000);
       pending.set(reqId, { resolve, timer });
       try {
-        window.postMessage(Object.assign({ __fct: true, kind: "turbo-req", reqId }, req), "*");
+        window.postMessage(Object.assign({ __fct: true, reqId }, req), "*");
       } catch (e) {
         clearTimeout(timer);
         pending.delete(reqId);
@@ -42,131 +46,33 @@ FCT.Turbo = (function () {
     });
   }
 
-  function pad2(n) { return n < 10 ? "0" + n : "" + n; }
-  function ymd(d) { return d.getFullYear() + "/" + pad2(d.getMonth() + 1) + "/" + pad2(d.getDate()); }
-
-  function splitName(full) {
-    const parts = String(full || "").trim().split(/\s+/);
-    return { firstName: parts[0] || "", lastName: parts.slice(1).join(" ") };
-  }
-
-  function nameFromPrefixId(s) {
-    const m = String(s == null ? "" : s).match(/^(?:company|user):\s*(.+)$/i);
-    return m ? m[1].replace(/\s+/g, " ").trim() : "";
-  }
-
-  function buildCompany(rec, now) {
-    if (rec.companyRaw && typeof rec.companyRaw === "object") return rec.companyRaw;
-    const cid = rec.companyId || "";
-    const portal = rec.portalName || "";
-    return {
-      a: true,
-      id: cid,
-      _id: cid,
-      city: "",
-      name: rec.companyName || nameFromPrefixId(cid),
-      state: null,
-      status: true,
-      street: "",
-      country: null,
-      zipCode: "",
-      original: null,
-      timeZone: { id: "ET" },
-      companyId: cid,
-      dotNumber: "",
-      terminals: [],
-      mainOffice: { city: "", state: null, street: "", country: null, zipCode: "", fullAddress: null },
-      departament: "",
-      portal,
-      portalId: rec.portalId || "",
-      portalEmail: "",
-      provider: String(portal).toUpperCase(),
-      countDriver: 0,
-      countDriverDriving: 0,
-      countDriverViolations: 0,
-      countViolations: 0,
-      violationTime: 0,
-      lastCheck: Math.floor(now / 1000),
-      lastCheckFormatted: ""
-    };
-  }
-
-  function buildMainDriver(rec) {
-    if (rec.driverRaw && typeof rec.driverRaw === "object") return rec.driverRaw;
-    const nm = splitName(rec.driverName || nameFromPrefixId(rec.driverId));
-    return {
-      _id: rec.driverId || "",
-      companyId: rec.companyId || "",
-      firstName: nm.firstName,
-      lastName: nm.lastName,
-      email: "",
-      phoneNum: "",
-      role: { id: "DRIVER" },
-      driverInfo: { licenseNumber: "", licenseState: null, providerSettings: null },
-      active: true,
-      original: null
-    };
-  }
-
-  function buildPayload(rec, task, cfg) {
-    const now = Date.now();
-    const portal = FCT.normalizeType(rec.portalName);
-    const inProc = (cfg.portalsInProcess || []).some(p => FCT.normalizeType(p) === portal);
-    let rawTypes = ((task && task.rawTypes) || [])
-      .map(s => String(s).trim())
-      .filter(s => s && !/^\+\d+$/.test(s));
-    if (!rawTypes.length && rec.tasksStr) {
-      rawTypes = rec.tasksStr.split(";").map(s => s.trim()).filter(Boolean);
-    }
-
-    const hist = {
-      otherEvents: [],
-      company: buildCompany(rec, now),
-      driversInfo: { mainDriver: buildMainDriver(rec) },
-      changes: { changesCount: 0, steps: [], changedEvents: [], createdEvents: [], deletedEvents: [] },
-      startData: { events: [], profile: { dailyLogSum: [], dailyLog: [] } }
-    };
-
-    return JSON.stringify({
-      CompanyId: rec.companyId,
-      CompanyName: rec.companyName,
-      PortalId: rec.portalId,
-      PortalName: rec.portalName,
-      CreateDate: now,
-      LastSyncDate: now,
-      Status: inProc ? "In process" : "Not started",
-      RangeDateBgn: ymd(new Date(now - 8 * 86400000)),
-      RangeDateEnd: ymd(new Date(now)),
-      DriverId: rec.driverId,
-      DriverName: rec.driverName,
-      TotalChanges: 0,
-      ChangedDays: "",
-      TransactionHistory: JSON.stringify(hist),
-      TaskId: rec.taskId,
-      CreateTask: false,
-      TaskSource: rec.source || "",
-      VehicleId: rec.vehicleId || "",
-      VehicleName: rec.vehicleName || "",
-      Grade: rec.grade != null && rec.grade !== "" ? (Number(rec.grade) || 0) : 0,
-      LastPickup: rec.lastPickupStr || "null",
-      LastChangeTime: now,
-      Tasks: rawTypes.join(";")
-    });
+  // taskId здесь — настоящий TaskId платформы: он есть и у SSE-детекта, и в
+  // реестре, собранном из TasksHistory. DOM-путь своего id платформы не знает
+  // (там хеш строки), поэтому для него сначала ищем запись по сигнатуре.
+  async function resolveTaskId(task, sig) {
+    if (task && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(task.id))) return String(task.id);
+    const t = spec();
+    const q = await requestViaPage({ kind: "turbo-req", sig: sig || {} }, (t && t.timeoutMs) || 6000);
+    return q && q.found && q.rec ? String(q.rec.taskId) : "";
   }
 
   async function grab(row, task, sig) {
     const t = spec();
     if (!isAvailable()) return { ok: false, error: "не настроен" };
-    const q = await requestViaPage({ sig: sig || {} }, t.timeoutMs);
-    if (!q.found || !q.rec) return { ok: false, error: "задача не найдена в реестре (" + (q.regSize || 0) + " зап.)" };
-    const body = buildPayload(q.rec, task, t);
+
+    const taskId = await resolveTaskId(task, sig);
+    if (!taskId) return { ok: false, error: "задача не найдена в реестре" };
+
     const res = await requestViaPage({
-      url: t.urlTemplate,
-      options: { method: t.method || "POST", headers: { "Content-Type": "application/json" }, body }
-    }, t.timeoutMs);
+      kind: "turbo-grab",
+      taskId,
+      rawTypes: (task && task.rawTypes) || [],
+      portalsInProcess: t.portalsInProcess || []
+    }, t.grabTimeoutMs || 25000);
+
     if (!res.ok) return { ok: false, error: res.error || ("HTTP " + res.status), status: res.status };
-    return { ok: true, status: res.status };
+    return { ok: true, status: res.status, events: res.events };
   }
 
-  return { isAvailable, grab, buildPayload };
+  return { isAvailable, grab };
 })();

@@ -484,7 +484,30 @@
       if (delay > 0) await sleepV(delay);
 
       const row = findRowById(key);
-      if (!row || !isUnassigned(row)) {
+
+      if (!row) {
+        // SSE-детект несёт настоящий id платформы — по хешу DOM-строки он
+        // никогда не найдётся (хеш считается из company+driver+дата, не из id).
+        // Пробуем Turbo вслепую по известному id; если не вышло — тихо выходим,
+        // независимый DOM-детект той же заявки (свой hash-id) подхватит как обычно,
+        // вплоть до клика.
+        if (task.portal !== undefined && FCT.Turbo && FCT.Turbo.isAvailable()) {
+          if (!portalAllowed(task.portal)) {
+            log({ event: "skip", id: key, type: task.type, detail: "портал выключен в настройках" });
+            return;
+          }
+          const r = await FCT.Turbo.grab(null, task, null);
+          if (r.ok) {
+            log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome: "turbo/no-row" });
+            try { chrome.runtime.sendMessage({ type: "fct-grab-ok" }).catch(() => {}); } catch (e) {}
+          } else if (!r.dedup) {
+            log({ event: "error", id: key, type: task.type, detail: "turbo (без DOM-строки): " + r.error });
+          }
+        }
+        return;
+      }
+
+      if (!isUnassigned(row)) {
         log({ event: "error", id: key, type: task.type, detail: "заявку уже забрали" });
         return;
       }
@@ -510,6 +533,11 @@
             type: task.type,
             detail: hadError ? "turbo: платформа сообщила об ошибке — откат на клик" : "turbo: статус не изменился — откат на клик"
           });
+        } else if (r.dedup) {
+          // Ту же заявку уже взял параллельный путь (SSE-детект) — кликать
+          // нельзя, иначе откроем диалог на уже занятую задачу.
+          log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome: "turbo/дубль" });
+          return;
         } else {
           log({ event: "error", id: key, type: task.type, detail: "turbo: " + r.error + " — откат на клик" });
         }
@@ -656,7 +684,7 @@
     if (msg.kind === "ws-task") {
       const t = msg.task;
       if (!t || t.id == null) return;
-      ingest({ id: String(t.id), type: FCT.typeFromAny(t.type) }, { via: "sse/ws" });
+      ingest({ id: String(t.id), type: FCT.typeFromAny(t.type), portal: t.portal || "" }, { via: "sse/ws" });
     } else if (msg.kind === "insert-observed") {
       log({
         event: msg.ok ? "info" : "error",

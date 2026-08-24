@@ -24,7 +24,9 @@ FCT.CONFIG = {
     method: "POST",
     urlTemplate: "https://api.flowconnect-group.com/api/FlowDashBoard/InsertTransactions",
     portalsInProcess: ["eld88", "gpstab", "fmeld", "prologs_stop", "synergy_stop"],
-    timeoutMs: 6000
+    timeoutMs: 6000,
+    // Захват = подготовительная цепочка (компания/водитель/HOS-журнал) + POST.
+    grabTimeoutMs: 25000
   },
 
   batchWindowMs: 25,
