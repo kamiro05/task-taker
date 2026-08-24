@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+  <title>FlowConnect Task Taker</title>
+</head>
+<body>
+  <header class="head">
+    <div class="brand">
+      <span class="logo">⚡</span>
+      <div>
+        <div class="title">Task Taker</div>
+        <div class="subtitle">alpha.flowconnect-group.com</div>
+      </div>
+    </div>
+    <button id="reinjectBtn" class="ghost wide">Подключить движок к этой вкладке</button>
+    <div id="reinjectStatus" class="reinject-status"></div>
+  </header>
+
+  <section class="toggles">
+    <label class="row main-row">
+      <span>Захват включён <small>(выключается при перезагрузке страницы)</small></span>
+      <input type="checkbox" id="enabled" class="switch">
+    </label>
+
+    <div class="row">
+      <span>Порталы</span>
+      <div class="chip-toggles">
+        <label class="chip-toggle">
+          <input type="checkbox" id="portalEld88">
+          <span>ELD88</span>
+        </label>
+        <label class="chip-toggle">
+          <input type="checkbox" id="portalFlow">
+          <span>FLOW</span>
+        </label>
+      </div>
+    </div>
+
+    <label class="row">
+      <span>Dry Run <small>(только журнал, без кликов)</small></span>
+      <input type="checkbox" id="dryRun" class="switch">
+    </label>
+    <label class="row">
+      <span>Только в активной вкладке</span>
+      <input type="checkbox" id="activeTabOnly" class="switch">
+    </label>
+
+    <div id="modeHint" class="mode-hint"></div>
+  </section>
+
+  <section>
+    <h2>Приоритеты типов</h2>
+    <p class="hint">Выше в списке — раньше берётся. Снятая галочка — никогда не брать.
+      Комбо-задача матчится только точным набором чипов: «new shift pti» — отдельный тип;
+      «new shift pti break» не совпадёт ни с чем. Свои типы добавляйте полем ниже.</p>
+    <ul id="priorityList" class="plist"></ul>
+    <div class="addrow">
+      <input type="text" id="newType" placeholder="Добавить тип вручную…">
+      <button id="addTypeBtn" title="Добавить">+</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Прочее</h2>
+    <label class="row">
+      <span>Неизвестные типы</span>
+      <select id="unknownPolicy">
+        <option value="skip">пропускать</option>
+        <option value="grab">брать (после известных)</option>
+      </select>
+    </label>
+    <label class="row">
+      <span>Задержка перед кликом, мс</span>
+      <span class="pair">
+        <input type="number" id="delayMin" min="0" max="5000" step="10">
+        <span>–</span>
+        <input type="number" id="delayMax" min="0" max="5000" step="10">
+      </span>
+    </label>
+  </section>
+
+  <section>
+    <h2>Журнал</h2>
+    <div class="loghead">
+      <button id="clearLogBtn" class="ghost">Очистить</button>
+    </div>
+    <ul id="logList" class="loglist"></ul>
+  </section>
+
+  <script src="../shared/platform-config.js"></script>
+  <script src="../shared/storage.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

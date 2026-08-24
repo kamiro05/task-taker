@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Task Taker — тест engine-core</title>
+  <style>
+    body { font: 13px/1.5 Consolas, monospace; background: #111418; color: #e6eaf0; padding: 20px; }
+    .pass { color: #16a34a; }
+    .fail { color: #dc2626; font-weight: bold; }
+    h1 { font-size: 16px; }
+    table { border-collapse: collapse; margin-top: 10px; }
+    td, th { border: 1px solid #2a323d; padding: 3px 10px; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Task Taker — тесты engine-core</h1>
+  <table id="results">
+    <tr><th>Тест</th><th>Ожидалось</th><th>Получено</th><th>Итог</th></tr>
+  </table>
+  <script src="../src/shared/platform-config.js"></script>
+  <script src="../src/shared/engine-core.js"></script>
+  <script>
+    const table = document.getElementById("results");
+
+    function row(name, expected, actual) {
+      const ok = JSON.stringify(expected) === JSON.stringify(actual);
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td>${name}</td>` +
+        `<td><code>${JSON.stringify(expected)}</code></td>` +
+        `<td><code>${JSON.stringify(actual)}</code></td>` +
+        `<td class="${ok ? "pass" : "fail"}">${ok ? "PASS" : "FAIL"}</td>`;
+      table.appendChild(tr);
+    }
+
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+    function baseCfg(over) {
+      return Object.assign({
+        enabled: true,
+        unknownPolicy: "skip",
+        priorities: [
+          { type: "type-a", enabled: true },
+          { type: "type-b", enabled: true },
+          { type: "type-c", enabled: false }
+        ]
+      }, over || {});
+    }
+
+    function makeQueue(cfg) {
+      const grabs = [];
+      const skips = [];
+      const q = FCT.EngineCore.createQueue(
+        cfg,
+        (task, info) => grabs.push([task.id, task.type]),
+        (task, reason) => skips.push([task.id, reason])
+      );
+      return { q, grabs, skips };
+    }
+
+    async function run() {
+      {
+        const cfg = baseCfg();
+        const { q, grabs, skips } = makeQueue(cfg);
+        q.submit({ id: 1, type: "Type-B" });
+        q.submit({ id: 2, type: "type-c" });
+        q.submit({ id: 3, type: "TYPE-A" });
+        q.submit({ id: 3, type: "type-a" });
+        q.submit({ id: 4, type: "mystery" });
+        await wait(80);
+        row("пачка: порядок приоритетов, дедуп, фильтры",
+          [[[3, "TYPE-A"], [1, "Type-B"]], [[2, "type-disabled"], [4, "unknown-type"]]],
+          [grabs, skips]);
+      }
+      {
+        const cfg = baseCfg({ enabled: false });
+        const { q, grabs } = makeQueue(cfg);
+        q.submit({ id: 9, type: "type-a" });
+        await wait(40);
+        row("мастер-выключен: ничего не берётся",
+          [], grabs);
+        cfg.enabled = true;
+        q.submit({ id: 9, type: "type-a" });
+        await wait(40);
+        row("включили после паузы: id не «сгорел»",
+          [[9, "type-a"]], grabs);
+      }
+      {
+        const cfg = baseCfg({ unknownPolicy: "grab" });
+        const { q, grabs } = makeQueue(cfg);
+        q.submit({ id: 5, type: "mystery" });
+        q.submit({ id: 6, type: "type-b" });
+        await wait(60);
+        row("неизвестные при policy=grab идут последними",
+          [[6, "type-b"], [5, "mystery"]], grabs);
+      }
+      {
+        const cfg = baseCfg();
+        const { q, grabs } = makeQueue(cfg);
+        q.submit({ id: null, type: "type-a" });
+        await wait(40);
+        row("задача без id отбрасывается",
+          [], grabs);
+      }
+      {
+        const cfg = baseCfg();
+        const { q, grabs } = makeQueue(cfg);
+        for (let i = 10; i < 25; i++) q.submit({ id: i, type: i % 2 ? "type-b" : "type-a" });
+        await wait(60);
+        row("большая пачка: сортировка по приоритету",
+          Array.from({ length: 15 }, (_, k) => k + 10)
+            .sort((a, b) => (a % 2 ? 1 : 0) - (b % 2 ? 1 : 0) || a - b)
+            .map(i => [i, i % 2 ? "type-b" : "type-a"]),
+          grabs);
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>
