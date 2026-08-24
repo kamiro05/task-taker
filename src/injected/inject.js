@@ -10,6 +10,9 @@
   const CREATED_RE = /new|creat|add|open|assign|publish|appear|incoming/i;
   const MAX_DEPTH = 4;
   const REG_LIMIT = 800;
+  // Платформа шлёт SSE именованными событиями (event: taskUpsert), не дефолтным
+  // "message" — без этого списка decodeData() никогда не вызывается на живых кадрах.
+  const SSE_EVENT_NAMES = ["message", "taskUpsert"];
 
   function post(task) {
     try {
@@ -117,6 +120,13 @@
         });
         if (m.size > REG_LIMIT) {
           m.delete(m.keys().next().value);
+        }
+        // Живой пуш уже несёт статус/исполнителя — если заявка свободна,
+        // сигналим content.js сразу, не дожидаясь перерисовки DOM.
+        const st = firstStr(obj, ["status", "Status"]);
+        const execId = firstStr(obj, ["executorUserId", "ExecutorUserId"]);
+        if (/not\s*started/i.test(st) && !execId) {
+          post({ id: tid, type: tasksStr });
         }
       }
     }
@@ -233,9 +243,11 @@
   if (NativeEventSource) {
     function PatchedEventSource(url, cfg) {
       const es = cfg !== undefined ? new NativeEventSource(url, cfg) : new NativeEventSource(url);
-      try {
-        es.addEventListener("message", (e) => decodeData(e.data));
-      } catch (e) {}
+      for (const evtName of SSE_EVENT_NAMES) {
+        try {
+          es.addEventListener(evtName, (e) => decodeData(e.data));
+        } catch (e) {}
+      }
       return es;
     }
 

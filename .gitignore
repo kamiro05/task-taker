@@ -1,5 +1,7 @@
 .kilo/
 .playwright-mcp/
+.mcp.json
+.playwright-mcp-config.json
 node_modules/
 *.log
 
