@@ -242,6 +242,18 @@
     });
   }
 
+  // После успешного turbo-захвата платформа сама страницу не откроет (диалога
+  // не было) — открываем её сами, как это делает клик-путь.
+  function openTransaction(r) {
+    if (!r || r.shared || !r.transactionId) return;
+    try {
+      chrome.runtime.sendMessage({
+        type: "fct-open-transaction",
+        url: C.origin + "/transaction/" + r.transactionId
+      }).catch(() => {});
+    } catch (e) {}
+  }
+
   const grabInFlight = new Set();
 
   function visibleDialogs(titleRe, selector) {
@@ -500,7 +512,8 @@
           if (r.ok) {
             log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome: "turbo/no-row" });
             try { chrome.runtime.sendMessage({ type: "fct-grab-ok" }).catch(() => {}); } catch (e) {}
-          } else if (!r.dedup) {
+            openTransaction(r);
+          } else if (!r.shared) {
             log({ event: "error", id: key, type: task.type, detail: "turbo (без DOM-строки): " + r.error });
           }
         }
@@ -520,23 +533,16 @@
       if (FCT.Turbo && FCT.Turbo.isAvailable()) {
         const r = await FCT.Turbo.grab(row, task, rowSigOf(row));
         if (r.ok) {
+          // POST принят — транзакция создана, и кликать уже нельзя: платформа
+          // ответит на такой клик HTTP 400, а диалог останется висеть. Строка
+          // может ещё не перерисоваться, это не повод для фолбэка.
           const outcome = await waitForTaken(row, key);
-          if (outcome) {
-            log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome: "turbo/" + outcome });
-            try { chrome.runtime.sendMessage({ type: "fct-grab-ok" }).catch(() => {}); } catch (e) {}
-            return;
-          }
-          const hadError = await watchForErrorText();
           log({
-            event: "error",
-            id: key,
-            type: task.type,
-            detail: hadError ? "turbo: платформа сообщила об ошибке — откат на клик" : "turbo: статус не изменился — откат на клик"
+            event: "grab", id: key, type: task.type, via: info.via, prio: info.prio,
+            outcome: "turbo/" + (outcome || "принят") + (r.shared ? " (парал.)" : "")
           });
-        } else if (r.dedup) {
-          // Ту же заявку уже взял параллельный путь (SSE-детект) — кликать
-          // нельзя, иначе откроем диалог на уже занятую задачу.
-          log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome: "turbo/дубль" });
+          try { chrome.runtime.sendMessage({ type: "fct-grab-ok" }).catch(() => {}); } catch (e) {}
+          openTransaction(r);
           return;
         } else {
           log({ event: "error", id: key, type: task.type, detail: "turbo: " + r.error + " — откат на клик" });

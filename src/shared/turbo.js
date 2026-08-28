@@ -70,8 +70,16 @@ FCT.Turbo = (function () {
       portalsInProcess: t.portalsInProcess || []
     }, t.grabTimeoutMs || 25000);
 
-    if (!res.ok) return { ok: false, error: res.error || ("HTTP " + res.status), status: res.status };
-    return { ok: true, status: res.status, events: res.events };
+    // shared — результат параллельного захвата той же задачи (см. turboGrab в
+    // inject.js). Флаг обязан дожить до content.js: по нему решается, кликать
+    // ли фолбэком.
+    if (!res.ok) {
+      return { ok: false, error: res.error || ("HTTP " + res.status), status: res.status, shared: !!res.shared };
+    }
+    return {
+      ok: true, status: res.status, events: res.events,
+      shared: !!res.shared, transactionId: res.transactionId || ""
+    };
   }
 
   return { isAvailable, grab };

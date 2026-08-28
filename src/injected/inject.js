@@ -417,7 +417,12 @@
   // ключам друг друга не видят, поэтому единственная точка, где оба сходятся с
   // уже разрешённым TaskId — здесь. Без этого рабочий turbo создаёт ДВЕ
   // транзакции на одну заявку.
-  const grabInFlight = new Set();
+  // Второй путь не отбрасываем, а подписываем на результат первого: если turbo
+  // уже летит по этому TaskId, оба получают один и тот же исход. Так DOM-путь
+  // не кликает по заявке, которую turbo уже взял (платформа отвечает на такой
+  // клик HTTP 400 и диалог остаётся висеть), но при ПРОВАЛЕ turbo фолбэк на
+  // клик по-прежнему отрабатывает.
+  const grabInFlight = new Map();
   const grabDone = new Set();
 
   async function turboGrab(msg) {
@@ -425,13 +430,20 @@
     if (!rec) return { ok: false, error: "задача не найдена в реестре (" + reg().size + " зап.)" };
 
     const tid = String(msg.taskId);
-    if (grabDone.has(tid)) return { ok: false, dedup: true, error: "уже захвачена этой вкладкой" };
-    if (grabInFlight.has(tid)) return { ok: false, dedup: true, error: "захват уже идёт" };
-    grabInFlight.add(tid);
+    if (grabDone.has(tid)) return { ok: true, shared: true, status: 200 };
+
+    const running = grabInFlight.get(tid);
+    if (running) {
+      const res = await running;
+      return Object.assign({}, res, { shared: true });
+    }
+
+    const p = turboGrabInner(msg, rec)
+      .then((res) => { if (res.ok) grabDone.add(tid); return res; })
+      .catch((e) => ({ ok: false, error: String((e && e.message) || e).slice(0, 200) }));
+    grabInFlight.set(tid, p);
     try {
-      const res = await turboGrabInner(msg, rec);
-      if (res.ok) grabDone.add(tid);
-      return res;
+      return await p;
     } finally {
       grabInFlight.delete(tid);
     }
@@ -508,7 +520,11 @@
       try { t = (await r.text()).slice(0, 200); } catch (e) {}
       return { ok: false, status: r.status, error: "HTTP " + r.status + (t ? " — " + t : ""), events: events.length };
     }
-    return { ok: true, status: r.status, events: events.length };
+    // Ответ: {"TransactionId":"<guid>"} — по нему открываем страницу транзакции,
+    // как это делает платформа после подтверждения диалога.
+    let transactionId = "";
+    try { transactionId = ((await r.json()) || {}).TransactionId || ""; } catch (e) {}
+    return { ok: true, status: r.status, events: events.length, transactionId };
   }
 
   // Прогреваем кеш компаний заранее, чтобы на захвате не платить за 3 МБ.

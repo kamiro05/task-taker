@@ -39,6 +39,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.type === "fct-grab-ok") {
     grabCount += 1;
     updateBadge(swEnabled, grabCount);
+  } else if (msg.type === "fct-open-transaction") {
+    // Turbo берёт задачу без диалога, поэтому страницу транзакции платформа не
+    // открывает — делаем это сами. Фоном (active: false), чтобы захват следующих
+    // заявок не сбивался переключением вкладки.
+    const url = String((msg && msg.url) || "");
+    if (/^https:\/\/alpha\.flowconnect-group\.com\/transaction\//.test(url)) {
+      try { chrome.tabs.create({ url, active: false }); } catch (e) {}
+    }
   } else if (msg.type === "fct-trusted-click") {
     const tabId = sender && sender.tab && sender.tab.id;
     if (!tabId) {
