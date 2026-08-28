@@ -54,7 +54,6 @@
   async function renderStats() {
     const s = await FCT.loadStats();
     $("statTotal").textContent = String(s.total || 0);
-    $("statTurbo").textContent = s.total ? Math.round((s.turbo / s.total) * 100) + "%" : "—";
     $("statAvg").textContent = s.total ? fmtMs(Math.round(s.sumMs / s.total)) : "—";
     $("statLast").textContent = s.lastAt ? fmtTs(s.lastAt) : "—";
   }
@@ -142,10 +141,8 @@
   }
 
   function renderModeHint() {
-    const ready = !!(FCT.CONFIG.turbo && FCT.CONFIG.turbo.urlTemplate);
-    $("modeHint").textContent = ready
-      ? "Захват: Turbo (прямой запрос) с автопереходом на клик, если Turbo не сработал"
-      : "Захват: клик по кнопке (Turbo ещё не настроен)";
+    $("modeHint").textContent =
+      "Захват: клик по кнопке «Start Transaction» с автоподтверждением диалога";
   }
 
   async function move(i, dir) {
@@ -288,7 +285,6 @@
     "src/shared/platform-config.js",
     "src/shared/engine-core.js",
     "src/shared/storage.js",
-    "src/shared/turbo.js",
     "src/content/content.js"
   ];
   const INJECT_MAIN = ["src/injected/inject.js"];

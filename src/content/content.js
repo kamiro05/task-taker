@@ -74,23 +74,6 @@
     return out;
   }
 
-  function rowSigOf(row) {
-    let c = "", dFull = "", cd = "";
-    try {
-      c = cellText(row, C.dom.companySelector);
-      dFull = cellText(row, C.dom.driverSelector).replace(/\s*CoDriver:.*/i, "");
-      cd = cellText(row, C.dom.createDateSelector);
-    } catch (e) {}
-    let ms = 0;
-    try {
-      const parts = String(cd).split(",");
-      if (parts.length >= 2) {
-        ms = Date.parse(parts[0] + ", " + new Date().getFullYear() + " " + parts.slice(1).join(",").trim()) || 0;
-      }
-    } catch (e) {}
-    return { c, d: dFull, t: ms, tk: FCT.typeKey(extractTypes(row)) };
-  }
-
   function extractId(row) {
     const basis = [
       cellText(row, C.dom.createDateSelector),
@@ -160,8 +143,6 @@
     btn.dispatchEvent(new MouseEvent("mouseup", opts));
     btn.click();
   }
-
-  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   let timerWorker = null;
   let timerSeq = 0;
@@ -269,26 +250,13 @@
 
   // Итог захвата: счётчики для попапа + звук. Время меряем от постановки
   // в очередь до подтверждённого взятия.
-  function onGrabbed(key, viaTurbo) {
+  function onGrabbed(key) {
     const started = detectedAt.get(String(key));
     detectedAt.delete(String(key));
     const ms = started ? Date.now() - started : 0;
     try { chrome.runtime.sendMessage({ type: "fct-grab-ok" }).catch(() => {}); } catch (e) {}
-    FCT.recordGrab({ ms, turbo: !!viaTurbo }).catch(() => {});
+    FCT.recordGrab({ ms }).catch(() => {});
     if (state.cfg.soundOnGrab !== false) beep();
-  }
-
-  // После успешного turbo-захвата платформа сама страницу не откроет (диалога
-  // не было) — открываем её сами, как это делает клик-путь.
-  function openTransaction(r) {
-    if (!r || r.shared) return;
-    const urls = [];
-    if (r.transactionId) urls.push(C.origin + "/transaction/" + r.transactionId);
-    // Для eld88 и подобных платформа открывает ещё и внешний портал провайдера.
-    if (r.externalUrl) urls.push(r.externalUrl);
-    for (const url of urls) {
-      try { chrome.runtime.sendMessage({ type: "fct-open-transaction", url }).catch(() => {}); } catch (e) {}
-    }
   }
 
   const grabInFlight = new Set();
@@ -534,30 +502,7 @@
 
       const row = findRowById(key);
 
-      if (!row) {
-        // SSE-детект несёт настоящий id платформы — по хешу DOM-строки он
-        // никогда не найдётся (хеш считается из company+driver+дата, не из id).
-        // Пробуем Turbo вслепую по известному id; если не вышло — тихо выходим,
-        // независимый DOM-детект той же заявки (свой hash-id) подхватит как обычно,
-        // вплоть до клика.
-        if (task.portal !== undefined && FCT.Turbo && FCT.Turbo.isAvailable()) {
-          if (!portalAllowed(task.portal)) {
-            log({ event: "skip", id: key, type: task.type, detail: "портал выключен в настройках" });
-            return;
-          }
-          const r = await FCT.Turbo.grab(null, task, null);
-          if (r.ok) {
-            log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome: "turbo/no-row" });
-            onGrabbed(key, true);
-            openTransaction(r);
-          } else if (!r.shared) {
-            log({ event: "error", id: key, type: task.type, detail: "turbo (без DOM-строки): " + r.error });
-          }
-        }
-        return;
-      }
-
-      if (!isUnassigned(row)) {
+      if (!row || !isUnassigned(row)) {
         log({ event: "error", id: key, type: task.type, detail: "заявку уже забрали" });
         return;
       }
@@ -565,25 +510,6 @@
       if (!portalAllowed(portalOf(row))) {
         log({ event: "skip", id: key, type: task.type, detail: "портал выключен в настройках" });
         return;
-      }
-
-      if (FCT.Turbo && FCT.Turbo.isAvailable()) {
-        const r = await FCT.Turbo.grab(row, task, rowSigOf(row));
-        if (r.ok) {
-          // POST принят — транзакция создана, и кликать уже нельзя: платформа
-          // ответит на такой клик HTTP 400, а диалог останется висеть. Строка
-          // может ещё не перерисоваться, это не повод для фолбэка.
-          const outcome = await waitForTaken(row, key);
-          log({
-            event: "grab", id: key, type: task.type, via: info.via, prio: info.prio,
-            outcome: "turbo/" + (outcome || "принят") + (r.shared ? " (парал.)" : "")
-          });
-          onGrabbed(key, true);
-          openTransaction(r);
-          return;
-        } else {
-          log({ event: "error", id: key, type: task.type, detail: "turbo: " + r.error + " — откат на клик" });
-        }
       }
 
       const btn = findTakeButton(row);
@@ -609,7 +535,7 @@
 
       if (outcome === "taken" || outcome === "status-changed" || outcome === "row-gone" || outcome === "dialog-closed") {
         log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome });
-        onGrabbed(key, false);
+        onGrabbed(key);
         return;
       }
 
@@ -664,10 +590,8 @@
   function ingest(task, meta) {
     const res = queue.submit(task, meta);
     if (res.action === "queued") {
-      // Задача принята очередью — греем компанию, пока идёт батч-окно и
-      // человеческая задержка.
+      // Отсюда считаем время захвата — до подтверждённого взятия.
       detectedAt.set(String(task.id), Date.now());
-      try { if (FCT.Turbo && FCT.Turbo.prewarm) FCT.Turbo.prewarm(task); } catch (e) {}
     } else if (res.action === "skip" && res.reason !== "disabled") {
       log({ event: "skip", id: String(task.id), type: task.type, detail: res.reason });
     }
@@ -729,11 +653,7 @@
     if (event.source !== window) return;
     const msg = event.data;
     if (!msg || msg.__fct !== true) return;
-    if (msg.kind === "ws-task") {
-      const t = msg.task;
-      if (!t || t.id == null) return;
-      ingest({ id: String(t.id), type: FCT.typeFromAny(t.type), portal: t.portal || "" }, { via: "sse/ws" });
-    } else if (msg.kind === "insert-observed") {
+    if (msg.kind === "insert-observed") {
       log({
         event: msg.ok ? "info" : "error",
         detail: "платформа InsertTransactions → HTTP " + msg.status + (msg.ok ? " (успех)" : " — сервер отклонил/таймаут")
@@ -795,7 +715,7 @@
       try { sendResponse({ ok: true, enabled: liveEnabled }); } catch (e) {}
     } else if (msg.type === "fct-get-state") {
       try {
-        sendResponse({ ok: true, enabled: liveEnabled, dryRun: !!state.cfg.dryRun, turboReady: !!(FCT.Turbo && FCT.Turbo.isAvailable()) });
+        sendResponse({ ok: true, enabled: liveEnabled, dryRun: !!state.cfg.dryRun });
       } catch (e) {}
     }
   });

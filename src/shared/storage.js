@@ -75,14 +75,13 @@ FCT.loadStats = async function () {
   const data = await chrome.storage.local.get(FCT.STORAGE_KEYS.stats);
   const s = data[FCT.STORAGE_KEYS.stats];
   const day = FCT.todayKey();
-  if (!s || s.day !== day) return { day, total: 0, turbo: 0, click: 0, sumMs: 0, lastAt: 0 };
+  if (!s || s.day !== day) return { day, total: 0, sumMs: 0, lastAt: 0 };
   return s;
 };
 
 FCT.recordGrab = async function (info) {
   const s = await FCT.loadStats();
   s.total += 1;
-  if (info && info.turbo) s.turbo += 1; else s.click += 1;
   if (info && info.ms > 0) s.sumMs += info.ms;
   s.lastAt = Date.now();
   await chrome.storage.local.set({ [FCT.STORAGE_KEYS.stats]: s });
