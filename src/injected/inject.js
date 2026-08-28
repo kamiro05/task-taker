@@ -435,6 +435,46 @@
     }, everyMs);
   }
 
+  // Внешние порталы (eld88 и т.п.) адресуют компанию и водителя обычными UUID,
+  // тогда как у платформы это префиксные short-id вида "Company:75peTSLzIdSG…".
+  // Преобразование снято один в один с бандла платформы (eld88Handler):
+  // base62-разбор → 16 байт little-endian → UUID с перестановкой первых трёх
+  // групп. Проверено: Company:75peTSLzIdSGvtvtWj2bNc →
+  // 49f6f44c-3343-4eb0-9b0b-3b5d91d816e9 — совпало с URL, который платформа
+  // открыла сама при клик-захвате.
+  const B62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+  function stripPrefix(s) {
+    if (!s) return "";
+    const k = String(s).indexOf(":");
+    return k !== -1 ? String(s).substring(k + 1) : String(s);
+  }
+
+  function shortIdToUuid(short) {
+    let acc = 0n;
+    for (const ch of String(short)) {
+      const v = B62.indexOf(ch);
+      if (v === -1) return "";
+      acc = 62n * acc + BigInt(v);
+    }
+    const bytes = [];
+    let x = acc;
+    while (x > 0n) { bytes.push(Number(x % 256n)); x /= 256n; }
+    while (bytes.length < 16) bytes.push(0);
+    const h = bytes.slice(0, 16).map((b) => b.toString(16).padStart(2, "0"));
+    return h[3] + h[2] + h[1] + h[0] + "-" + h[5] + h[4] + "-" + h[7] + h[6] +
+      "-" + h[8] + h[9] + "-" + h[10] + h[11] + h[12] + h[13] + h[14] + h[15];
+  }
+
+  function externalPortalUrl(rec, templates) {
+    const tpl = templates && templates[String(rec.portalName || "").toLowerCase()];
+    if (!tpl) return "";
+    const co = shortIdToUuid(stripPrefix(rec.companyId));
+    const drv = shortIdToUuid(stripPrefix(rec.driverId));
+    if (!co || !drv) return "";
+    return tpl.replace("{company}", co).replace("{driver}", drv);
+  }
+
   function pad2(n) { return n < 10 ? "0" + n : "" + n; }
   function ymd(d) { return d.getFullYear() + "/" + pad2(d.getMonth() + 1) + "/" + pad2(d.getDate()); }
 
@@ -575,7 +615,10 @@
     // как это делает платформа после подтверждения диалога.
     let transactionId = "";
     try { transactionId = ((await r.json()) || {}).TransactionId || ""; } catch (e) {}
-    return { ok: true, status: r.status, events: events.length, transactionId };
+    return {
+      ok: true, status: r.status, events: events.length, transactionId,
+      externalUrl: externalPortalUrl(rec, msg.externalPortals)
+    };
   }
 
   // Прогреваем кеш компаний заранее, чтобы на захвате не платить за 3 МБ,

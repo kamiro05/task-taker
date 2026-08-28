@@ -281,13 +281,14 @@
   // После успешного turbo-захвата платформа сама страницу не откроет (диалога
   // не было) — открываем её сами, как это делает клик-путь.
   function openTransaction(r) {
-    if (!r || r.shared || !r.transactionId) return;
-    try {
-      chrome.runtime.sendMessage({
-        type: "fct-open-transaction",
-        url: C.origin + "/transaction/" + r.transactionId
-      }).catch(() => {});
-    } catch (e) {}
+    if (!r || r.shared) return;
+    const urls = [];
+    if (r.transactionId) urls.push(C.origin + "/transaction/" + r.transactionId);
+    // Для eld88 и подобных платформа открывает ещё и внешний портал провайдера.
+    if (r.externalUrl) urls.push(r.externalUrl);
+    for (const url of urls) {
+      try { chrome.runtime.sendMessage({ type: "fct-open-transaction", url }).catch(() => {}); } catch (e) {}
+    }
   }
 
   const grabInFlight = new Set();

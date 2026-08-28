@@ -648,3 +648,56 @@ CompanyAccessToken 317 мс + PortalDrivers 1356 мс — ~1.7 с из ~2 с н�
 в Chrome Web Store.
 
 node --check 8/8 чисто, manifest → 0.6.0.
+
+## 25. v0.6.1: startData НУЖЕН (гипотеза закрыта), внешний портал eld88
+
+**Гипотеза про пустой `startData` проверена боевым захватом — и отклонена.**
+
+Что показал тест (`includeStartData: false`, одна реальная заявка):
+- сервер такую транзакцию **принимает**: `HTTP 200`, `{"TransactionId":…}`;
+- три provider-запроса не уходят вовсе (проверено по `performance`:
+  0 вызовов HosEvents/DailyLog/DailyLogSummaries), захват = **один POST
+  на 1157 мс**;
+- страница транзакции открывается полностью рабочей — график, события, часы:
+  логи платформа подтягивает с провайдера заново, наш снимок для отображения
+  не используется.
+
+Но в бандле нашлось, ЗАЧЕМ он платформе:
+
+```js
+toggleTime(){ this.displayTime = this.activeDisplayTime ? "endData" : "startData"; … }
+// и подстановка startData как исходного состояния:
+!TransactionHistory[displayTime]?.events?.length && TransactionHistory.startData?.events.length
+  && (TransactionHistory[displayTime] = JSON.parse(JSON.stringify(TransactionHistory.startData)))
+```
+
+`startData` — снимок журнала «как было ДО правок», в интерфейсе транзакции есть
+переключатель startData/endData. С пустым startData сравнение до/после теряется —
+а это суть работы оператора. Флаг оставлен (`includeStartData`), но по умолчанию
+`true`: секунда не стоит потери базы сравнения.
+
+**Внешний портал eld88.** Платформа после захвата открывает не только страницу
+транзакции, но и сайт провайдера. Из бандла (`eld88Handler`):
+
+```js
+window.open(`https://portal.eld88.us/co/${EW(fF(company._id))}/compliance/logs/${EW(fF(driverId))}`)
+```
+
+`fF` срезает префикс (`Company:75peTSLzIdSG…` → `75peTSLzIdSG…`), `EW`
+разворачивает base62-shortId в UUID: разбор по алфавиту
+`0-9A-Za-z` → 16 байт little-endian → перестановка первых трёх групп
+(`E[3]E[2]E[1]E[0]-E[5]E[4]-E[7]E[6]-…`). Алгоритм перенесён в inject.js
+(`shortIdToUuid`) и **сверен с эталоном**: `Company:75peTSLzIdSGvtvtWj2bNc` →
+`49f6f44c-3343-4eb0-9b0b-3b5d91d816e9` — ровно тот UUID, что был в URL,
+который платформа открыла сама при клик-захвате 24 августа.
+
+Шаблон ссылки лежит в `platform-config.js` (`turbo.externalPortals`, ключ —
+`portalName`), чтобы платформенные строки оставались в одном файле; inject.js
+подставляет UUID и возвращает `externalUrl`, content.js передаёт её тому же
+`fct-open-transaction`, SW открывает фоновой вкладкой. В SW allowlist добавлен
+`portal.eld88.us/co/`. Для не-eld88 порталов ссылка не строится (пустая строка).
+Рядом в бандле есть `gpstabHandler` (`app.gpstab.com/client/log…`, там короткий
+id без конвертации + дата в таймзоне компании) — при необходимости добавляется
+тем же способом.
+
+node --check 8/8 чисто, manifest → 0.6.1.

@@ -68,7 +68,8 @@ FCT.Turbo = (function () {
       taskId,
       rawTypes: (task && task.rawTypes) || [],
       portalsInProcess: t.portalsInProcess || [],
-      includeStartData: t.includeStartData !== false
+      includeStartData: t.includeStartData !== false,
+      externalPortals: t.externalPortals || {}
     }, t.grabTimeoutMs || 25000);
 
     // shared — результат параллельного захвата той же задачи (см. turboGrab в
@@ -79,7 +80,8 @@ FCT.Turbo = (function () {
     }
     return {
       ok: true, status: res.status, events: res.events,
-      shared: !!res.shared, transactionId: res.transactionId || ""
+      shared: !!res.shared, transactionId: res.transactionId || "",
+      externalUrl: res.externalUrl || ""
     };
   }
 

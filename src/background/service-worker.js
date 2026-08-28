@@ -44,7 +44,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // открывает — делаем это сами. Фоном (active: false), чтобы захват следующих
     // заявок не сбивался переключением вкладки.
     const url = String((msg && msg.url) || "");
-    if (/^https:\/\/alpha\.flowconnect-group\.com\/transaction\//.test(url)) {
+    const allowed = [
+      /^https:\/\/alpha\.flowconnect-group\.com\/transaction\//,
+      /^https:\/\/portal\.eld88\.us\/co\//
+    ];
+    if (allowed.some((re) => re.test(url))) {
       try { chrome.tabs.create({ url, active: false }); } catch (e) {}
     }
   } else if (msg.type === "fct-trusted-click") {
