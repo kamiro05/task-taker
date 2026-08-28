@@ -761,6 +761,13 @@
     log({ event: "error", detail: "JS: " + (e.message || "unknown") });
   }, true);
 
+  // Бейдж рисует service worker, а liveEnabled живёт здесь и обнуляется вместе
+  // со страницей. Сообщаем своё состояние сами: при загрузке (выключено) и при
+  // каждом переключении — иначе бейдж застревает на ON у выключённого захвата.
+  function reportTabState() {
+    try { chrome.runtime.sendMessage({ type: "fct-tab-state", enabled: liveEnabled }).catch(() => {}); } catch (e) {}
+  }
+
   function onReady() {
     try {
       const isTasksPage = /task/i.test(location.pathname) || !!document.querySelector("table.tasks-table");
@@ -768,6 +775,7 @@
         log({ event: "info", detail: "движок загружен на странице задач" });
       }
     } catch (e) {}
+    reportTabState();
     scheduleRescan();
   }
 
@@ -782,6 +790,7 @@
     if (!msg || typeof msg !== "object") return;
     if (msg.type === "fct-set-enabled") {
       liveEnabled = !!msg.value;
+      reportTabState();
       log({ event: "info", detail: liveEnabled ? "захват ВКЛЮЧЁН" : "захват выключен" });
       try { sendResponse({ ok: true, enabled: liveEnabled }); } catch (e) {}
     } else if (msg.type === "fct-get-state") {

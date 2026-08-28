@@ -72,8 +72,9 @@
     } catch (e) {}
   }
 
+  // Бейдж SW не трогаем: о состоянии ему сообщают сами вкладки (fct-tab-state),
+  // иначе после перезагрузки страницы бейдж расходится с реальностью.
   async function broadcastEnabled(value) {
-    try { chrome.runtime.sendMessage({ type: "fct-enabled", value }).catch(() => {}); } catch (e) {}
     let tabs = [];
     try { tabs = await chrome.tabs.query({ url: "https://alpha.flowconnect-group.com/*" }); } catch (e) {}
     for (const t of tabs) {

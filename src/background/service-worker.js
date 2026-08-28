@@ -1,14 +1,32 @@
 const BADGE_COLOR = "#16a34a";
 const BADGE_COLOR_OFF = "#9ca3af";
 
-let swEnabled = false;
+// Источник правды о захвате — сами вкладки, а не попап: liveEnabled живёт в
+// content script и умирает вместе со страницей при перезагрузке. Раньше об
+// этом никто не сообщал, и бейдж продолжал показывать ON у выключенного
+// расширения. Теперь каждая вкладка сама сообщает своё состояние, а её уход
+// (перезагрузка/закрытие) убирает её из набора.
+const enabledTabs = new Set();
 let grabCount = 0;
 
-function updateBadge(enabled, count) {
-  const text = enabled ? (count > 0 ? String(count) : "ON") : "";
-  chrome.action.setBadgeText({ text });
-  chrome.action.setBadgeBackgroundColor({ color: enabled ? BADGE_COLOR : BADGE_COLOR_OFF });
+function updateBadge() {
+  const on = enabledTabs.size > 0;
+  if (!on) grabCount = 0;
+  chrome.action.setBadgeText({ text: on ? (grabCount > 0 ? String(grabCount) : "ON") : "" });
+  chrome.action.setBadgeBackgroundColor({ color: on ? BADGE_COLOR : BADGE_COLOR_OFF });
 }
+
+function setTabEnabled(tabId, on) {
+  if (!tabId) return;
+  if (on) enabledTabs.add(tabId); else enabledTabs.delete(tabId);
+  updateBadge();
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => setTabEnabled(tabId, false));
+// Навигация/перезагрузка уносит content script вместе с состоянием.
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === "loading") setTabEnabled(tabId, false);
+});
 
 async function trustedClick(tabId, x, y) {
   const target = { tabId };
@@ -32,13 +50,11 @@ async function trustedClick(tabId, x, y) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg.type !== "string") return;
-  if (msg.type === "fct-enabled") {
-    swEnabled = !!msg.value;
-    if (!swEnabled) grabCount = 0;
-    updateBadge(swEnabled, grabCount);
+  if (msg.type === "fct-tab-state") {
+    setTabEnabled(sender && sender.tab && sender.tab.id, !!msg.enabled);
   } else if (msg.type === "fct-grab-ok") {
     grabCount += 1;
-    updateBadge(swEnabled, grabCount);
+    updateBadge();
   } else if (msg.type === "fct-open-transaction") {
     // Turbo берёт задачу без диалога, поэтому страницу транзакции платформа не
     // открывает — делаем это сами. Фоном (active: false), чтобы захват следующих
