@@ -18,6 +18,19 @@
     <div id="reinjectStatus" class="reinject-status"></div>
   </header>
 
+  <section id="statusCard" class="status-card">
+    <div class="status-main">
+      <span id="statusBadge" class="status-badge">—</span>
+      <span id="statusHint" class="status-hint"></span>
+    </div>
+    <div class="stats-row">
+      <div class="stat"><span id="statTotal" class="stat-v">0</span><span class="stat-k">за сегодня</span></div>
+      <div class="stat"><span id="statTurbo" class="stat-v">—</span><span class="stat-k">через Turbo</span></div>
+      <div class="stat"><span id="statAvg" class="stat-v">—</span><span class="stat-k">среднее</span></div>
+      <div class="stat"><span id="statLast" class="stat-v">—</span><span class="stat-k">последний</span></div>
+    </div>
+  </section>
+
   <section class="toggles">
     <label class="row main-row">
       <span>Захват включён <small>(выключается при перезагрузке страницы)</small></span>
@@ -45,6 +58,10 @@
     <label class="row">
       <span>Только в активной вкладке</span>
       <input type="checkbox" id="activeTabOnly" class="switch">
+    </label>
+    <label class="row">
+      <span>Звук при захвате</span>
+      <input type="checkbox" id="soundOnGrab" class="switch">
     </label>
 
     <div id="modeHint" class="mode-hint"></div>
@@ -84,6 +101,10 @@
   <section>
     <h2>Журнал</h2>
     <div class="loghead">
+      <label class="logfilter">
+        <input type="checkbox" id="logOnlyImportant">
+        <span>только захваты и ошибки</span>
+      </label>
       <button id="clearLogBtn" class="ghost">Очистить</button>
     </div>
     <ul id="logList" class="loglist"></ul>

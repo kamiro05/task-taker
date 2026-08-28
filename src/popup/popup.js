@@ -2,7 +2,7 @@
   const $ = (id) => document.getElementById(id);
   let cfg = null;
 
-  const toggleIds = ["dryRun", "activeTabOnly"];
+  const toggleIds = ["dryRun", "activeTabOnly", "soundOnGrab", "logOnlyImportant"];
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   async function init() {
@@ -16,8 +16,47 @@
     $("delayMax").value = cfg.humanDelayMaxMs;
     renderPriorities();
     renderModeHint();
+    await renderStats();
     await renderLog();
     await syncEnabledFromTab();
+    renderStatus();
+  }
+
+  // Крупный статус, чтобы боевой режим нельзя было проглядеть: раньше его
+  // приходилось собирать глазами из трёх отдельных тумблеров.
+  function renderStatus() {
+    const on = $("enabled").checked;
+    const dry = $("dryRun").checked;
+    const badge = $("statusBadge");
+    const card = $("statusCard");
+    const hint = $("statusHint");
+    card.classList.remove("live", "dry", "off");
+    if (!on) {
+      badge.textContent = "ВЫКЛ";
+      card.classList.add("off");
+      hint.textContent = "захват не работает";
+    } else if (dry) {
+      badge.textContent = "DRY RUN";
+      card.classList.add("dry");
+      hint.textContent = "только журнал, заявки не берутся";
+    } else {
+      badge.textContent = "БОЕВОЙ";
+      card.classList.add("live");
+      hint.textContent = "заявки берутся по-настоящему";
+    }
+  }
+
+  function fmtMs(ms) {
+    if (!ms) return "—";
+    return ms < 1000 ? Math.round(ms) + " мс" : (ms / 1000).toFixed(1) + " с";
+  }
+
+  async function renderStats() {
+    const s = await FCT.loadStats();
+    $("statTotal").textContent = String(s.total || 0);
+    $("statTurbo").textContent = s.total ? Math.round((s.turbo / s.total) * 100) + "%" : "—";
+    $("statAvg").textContent = s.total ? fmtMs(Math.round(s.sumMs / s.total)) : "—";
+    $("statLast").textContent = s.lastAt ? fmtTs(s.lastAt) : "—";
   }
 
   async function syncEnabledFromTab() {
@@ -147,7 +186,19 @@
     const logs = Array.isArray(data[FCT.STORAGE_KEYS.logs]) ? data[FCT.STORAGE_KEYS.logs] : [];
     const ul = $("logList");
     ul.textContent = "";
-    for (const e of logs.slice(0, 30)) {
+    // Штатные skip'ы (не тот тип) — 90% строк; под фильтром остаётся то,
+    // ради чего в журнал вообще заглядывают.
+    const shown = $("logOnlyImportant").checked
+      ? logs.filter(e => e.event === "grab" || e.event === "error")
+      : logs;
+    if (!shown.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "пусто";
+      ul.appendChild(li);
+      return;
+    }
+    for (const e of shown.slice(0, 30)) {
       const li = document.createElement("li");
       const t = document.createElement("span");
       t.className = "t";
@@ -168,11 +219,14 @@
     $(id).addEventListener("change", async (e) => {
       cfg[id] = e.target.checked;
       await save();
+      if (id === "dryRun") renderStatus();
+      if (id === "logOnlyImportant") await renderLog();
     });
   }
 
   $("enabled").addEventListener("change", async (e) => {
     await broadcastEnabled(!!e.target.checked);
+    renderStatus();
   });
 
   $("portalEld88").addEventListener("change", async (e) => {
@@ -269,6 +323,7 @@
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes[FCT.STORAGE_KEYS.logs]) renderLog();
+    if (changes[FCT.STORAGE_KEYS.stats]) renderStats();
   });
 
   init();

@@ -328,11 +328,24 @@
 
   const API_BASE = "https://api.flowconnect-group.com";
   const PORTALS_TTL_MS = 30 * 60 * 1000;
-  const DRIVERS_TTL_MS = 5 * 60 * 1000;
+  const DRIVERS_TTL_MS = 10 * 60 * 1000;
+  // Токен провайдера живёт недолго — держим запас и обновляем чаще водителей.
+  const TOKEN_TTL_MS = 4 * 60 * 1000;
 
   let companyMapPromise = null;
   let companyMapAt = 0;
+  // Кеши хранят ПРОМИСЫ, а не результаты: если предпрогрев уже начал запрос,
+  // захват подхватит тот же промис вместо второго такого же обращения к API.
   const driversCache = new Map();
+  const tokenCache = new Map();
+
+  function cached(store, key, ttl, make) {
+    const hit = store.get(key);
+    if (hit && Date.now() - hit.at < ttl) return hit.p;
+    const p = make().catch((e) => { store.delete(key); throw e; });
+    store.set(key, { at: Date.now(), p });
+    return p;
+  }
 
   function authToken() {
     try { return localStorage.getItem("auth") || ""; } catch (e) { return ""; }
@@ -367,27 +380,59 @@
     return companyMapPromise;
   }
 
-  async function getMainDriver(rec) {
-    const key = rec.portalId + "|" + rec.companyId;
-    const hit = driversCache.get(key);
-    let users;
-    if (hit && Date.now() - hit.at < DRIVERS_TTL_MS) {
-      users = hit.users;
-    } else {
+  function loadUsers(rec) {
+    return cached(driversCache, rec.portalId + "|" + rec.companyId, DRIVERS_TTL_MS, () => {
       const q = "?PortalId=" + encodeURIComponent(rec.portalId) +
         "&PortalCompanyId=" + encodeURIComponent(rec.companyId) +
         "&GetUsers=true&GetVehicles=true&GetLatestDriverStatuses=true";
-      const res = await apiGet("/api/FlowManage/PortalDrivers" + q);
-      users = (res && res.Users) || [];
-      driversCache.set(key, { at: Date.now(), users });
-    }
+      return apiGet("/api/FlowManage/PortalDrivers" + q).then((res) => (res && res.Users) || []);
+    });
+  }
+
+  async function getMainDriver(rec) {
+    const users = await loadUsers(rec);
     return users.find((u) => u && String(u._id) === String(rec.driverId)) || null;
   }
 
   function getProviderToken(rec) {
-    const q = "?PortalId=" + encodeURIComponent(rec.portalId) +
-      "&PortalCompanyId=" + encodeURIComponent(rec.companyId);
-    return apiGet("/api/FlowManage/CompanyAccessToken" + q);
+    return cached(tokenCache, rec.portalId + "|" + rec.companyId, TOKEN_TTL_MS, () => {
+      const q = "?PortalId=" + encodeURIComponent(rec.portalId) +
+        "&PortalCompanyId=" + encodeURIComponent(rec.companyId);
+      return apiGet("/api/FlowManage/CompanyAccessToken" + q);
+    });
+  }
+
+  // Предпрогрев: токен и список водителей — самая дорогая часть подготовки
+  // (~1.7 с из ~2 с). Оба запроса не зависят от конкретной задачи, только от
+  // компании, поэтому их можно взять заранее. Дальше захват просто подхватит
+  // готовые промисы из кеша.
+  function prewarmCompany(rec) {
+    if (!rec || !rec.portalId || !rec.companyId) return;
+    try { getProviderToken(rec).catch(() => {}); } catch (e) {}
+    try { loadUsers(rec).catch(() => {}); } catch (e) {}
+  }
+
+  // Фоновый прогрев самых свежих компаний реестра. Идёт медленно и с потолком,
+  // чтобы не долбить API: он уже показывал заградительные ответы под нагрузкой.
+  let prewarmTimer = null;
+  function startBackgroundPrewarm(limit, everyMs) {
+    if (prewarmTimer) return;
+    let done = 0;
+    prewarmTimer = setInterval(() => {
+      if (done >= limit) { clearInterval(prewarmTimer); prewarmTimer = null; return; }
+      const seen = new Set();
+      const recs = Array.from(reg().values()).reverse();
+      for (const rec of recs) {
+        const key = rec.portalId + "|" + rec.companyId;
+        if (seen.has(key) || tokenCache.has(key)) continue;
+        seen.add(key);
+        prewarmCompany(rec);
+        done++;
+        return;
+      }
+      clearInterval(prewarmTimer);
+      prewarmTimer = null;
+    }, everyMs);
   }
 
   function pad2(n) { return n < 10 ? "0" + n : "" + n; }
@@ -460,14 +505,20 @@
     const bgnStr = ymd(new Date(now - 8 * 86400000));
     const hosStartStr = ymd(new Date(now - 11 * 86400000));
 
-    const providerToken = await getProviderToken(rec);
-    const [mainDriver, provider] = await Promise.all([
+    // Водитель не зависит от токена — тянем их параллельно, а не по очереди.
+    const [mainDriver, providerToken] = await Promise.all([
       getMainDriver(rec).catch(() => null),
-      providerData(rec, company, providerToken, bgnStr, endStr, hosStartStr)
+      getProviderToken(rec)
     ]);
-    const [events, dailyLog, dailyLogSum] = provider;
-
     if (!mainDriver) return { ok: false, error: "водитель не найден в PortalDrivers" };
+
+    // includeStartData=false шлёт транзакцию без HOS-журнала: экономит три
+    // запроса (~1 с), но в истории транзакции не будет снимка логов, который
+    // платформа туда кладёт. Включается осознанно.
+    const withStart = msg.includeStartData !== false;
+    const [events, dailyLog, dailyLogSum] = withStart
+      ? await providerData(rec, company, providerToken, bgnStr, endStr, hosStartStr)
+      : [[], [], []];
 
     const inProc = (msg.portalsInProcess || []).some(
       (p) => String(p).toLowerCase() === String(rec.portalName || "").toLowerCase()
@@ -527,13 +578,25 @@
     return { ok: true, status: r.status, events: events.length, transactionId };
   }
 
-  // Прогреваем кеш компаний заранее, чтобы на захвате не платить за 3 МБ.
-  setTimeout(() => { loadCompanyMap().catch(() => {}); }, 4000);
+  // Прогреваем кеш компаний заранее, чтобы на захвате не платить за 3 МБ,
+  // следом — токены и водителей по свежим компаниям реестра.
+  setTimeout(() => {
+    loadCompanyMap()
+      .then(() => startBackgroundPrewarm(15, 4000))
+      .catch(() => {});
+  }, 4000);
 
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     const msg = event.data;
     if (!msg || msg.__fct !== true) return;
+
+    // Точечный прогрев: content.js зовёт его, как только задача прошла фильтр
+    // приоритетов, — к моменту захвата запросы уже в пути.
+    if (msg.kind === "turbo-prewarm") {
+      try { prewarmCompany(reg().get(String(msg.taskId))); } catch (e) {}
+      return;
+    }
 
     if (msg.kind === "turbo-grab") {
       turboGrab(msg)

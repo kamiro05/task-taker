@@ -2,7 +2,8 @@ globalThis.FCT = globalThis.FCT || {};
 
 FCT.STORAGE_KEYS = {
   cfg: "cfg",
-  logs: "logs"
+  logs: "logs",
+  stats: "stats"
 };
 
 FCT.SEED_VERSION = 2;
@@ -19,6 +20,8 @@ FCT.DEFAULT_CFG = {
   dryRun: true,
   unknownPolicy: "skip",
   activeTabOnly: false,
+  soundOnGrab: true,
+  logOnlyImportant: false,
   humanDelayMinMs: 0,
   humanDelayMaxMs: 40,
   seedVersion: 0,
@@ -58,6 +61,32 @@ FCT.patchCfg = async function (partial) {
   const next = Object.assign({}, cfg, partial);
   await FCT.saveCfg(next);
   return next;
+};
+
+// Счётчики захватов. Держим отдельно от журнала: тот обрезается до 50 строк,
+// а статистика должна пережить обрезку. Сбрасывается на новый день.
+FCT.todayKey = function () {
+  const d = new Date();
+  const p = (n) => (n < 10 ? "0" + n : "" + n);
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+};
+
+FCT.loadStats = async function () {
+  const data = await chrome.storage.local.get(FCT.STORAGE_KEYS.stats);
+  const s = data[FCT.STORAGE_KEYS.stats];
+  const day = FCT.todayKey();
+  if (!s || s.day !== day) return { day, total: 0, turbo: 0, click: 0, sumMs: 0, lastAt: 0 };
+  return s;
+};
+
+FCT.recordGrab = async function (info) {
+  const s = await FCT.loadStats();
+  s.total += 1;
+  if (info && info.turbo) s.turbo += 1; else s.click += 1;
+  if (info && info.ms > 0) s.sumMs += info.ms;
+  s.lastAt = Date.now();
+  await chrome.storage.local.set({ [FCT.STORAGE_KEYS.stats]: s });
+  return s;
 };
 
 FCT.appendLog = async function (entry) {

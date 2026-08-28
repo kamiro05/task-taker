@@ -242,6 +242,42 @@
     });
   }
 
+  // Момент, когда задача попала в очередь — от него считаем время захвата.
+  const detectedAt = new Map();
+
+  // Короткий сигнал при захвате: оператор может смотреть в другую вкладку.
+  // Web Audio выбран намеренно — не требует разрешения "notifications",
+  // которое пришлось бы обосновывать при публикации в Chrome Web Store.
+  function beep() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.24);
+      osc.onended = () => { try { ctx.close(); } catch (e) {} };
+    } catch (e) {}
+  }
+
+  // Итог захвата: счётчики для попапа + звук. Время меряем от постановки
+  // в очередь до подтверждённого взятия.
+  function onGrabbed(key, viaTurbo) {
+    const started = detectedAt.get(String(key));
+    detectedAt.delete(String(key));
+    const ms = started ? Date.now() - started : 0;
+    try { chrome.runtime.sendMessage({ type: "fct-grab-ok" }).catch(() => {}); } catch (e) {}
+    FCT.recordGrab({ ms, turbo: !!viaTurbo }).catch(() => {});
+    if (state.cfg.soundOnGrab !== false) beep();
+  }
+
   // После успешного turbo-захвата платформа сама страницу не откроет (диалога
   // не было) — открываем её сами, как это делает клик-путь.
   function openTransaction(r) {
@@ -511,7 +547,7 @@
           const r = await FCT.Turbo.grab(null, task, null);
           if (r.ok) {
             log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome: "turbo/no-row" });
-            try { chrome.runtime.sendMessage({ type: "fct-grab-ok" }).catch(() => {}); } catch (e) {}
+            onGrabbed(key, true);
             openTransaction(r);
           } else if (!r.shared) {
             log({ event: "error", id: key, type: task.type, detail: "turbo (без DOM-строки): " + r.error });
@@ -541,7 +577,7 @@
             event: "grab", id: key, type: task.type, via: info.via, prio: info.prio,
             outcome: "turbo/" + (outcome || "принят") + (r.shared ? " (парал.)" : "")
           });
-          try { chrome.runtime.sendMessage({ type: "fct-grab-ok" }).catch(() => {}); } catch (e) {}
+          onGrabbed(key, true);
           openTransaction(r);
           return;
         } else {
@@ -572,7 +608,7 @@
 
       if (outcome === "taken" || outcome === "status-changed" || outcome === "row-gone" || outcome === "dialog-closed") {
         log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome });
-        try { chrome.runtime.sendMessage({ type: "fct-grab-ok" }).catch(() => {}); } catch (e) {}
+        onGrabbed(key, false);
         return;
       }
 
@@ -626,7 +662,12 @@
 
   function ingest(task, meta) {
     const res = queue.submit(task, meta);
-    if (res.action === "skip" && res.reason !== "disabled") {
+    if (res.action === "queued") {
+      // Задача принята очередью — греем компанию, пока идёт батч-окно и
+      // человеческая задержка.
+      detectedAt.set(String(task.id), Date.now());
+      try { if (FCT.Turbo && FCT.Turbo.prewarm) FCT.Turbo.prewarm(task); } catch (e) {}
+    } else if (res.action === "skip" && res.reason !== "disabled") {
       log({ event: "skip", id: String(task.id), type: task.type, detail: res.reason });
     }
   }

@@ -67,7 +67,8 @@ FCT.Turbo = (function () {
       kind: "turbo-grab",
       taskId,
       rawTypes: (task && task.rawTypes) || [],
-      portalsInProcess: t.portalsInProcess || []
+      portalsInProcess: t.portalsInProcess || [],
+      includeStartData: t.includeStartData !== false
     }, t.grabTimeoutMs || 25000);
 
     // shared — результат параллельного захвата той же задачи (см. turboGrab в
@@ -82,5 +83,15 @@ FCT.Turbo = (function () {
     };
   }
 
-  return { isAvailable, grab };
+  // Точечный прогрев компании: зовётся, как только задача прошла фильтр
+  // приоритетов, чтобы токен и водители уже ехали к моменту захвата.
+  function prewarm(task) {
+    const id = task && task.id;
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(id))) return;
+    try {
+      window.postMessage({ __fct: true, kind: "turbo-prewarm", taskId: String(id) }, "*");
+    } catch (e) {}
+  }
+
+  return { isAvailable, grab, prewarm };
 })();

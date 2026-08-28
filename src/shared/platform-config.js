@@ -26,7 +26,11 @@ FCT.CONFIG = {
     portalsInProcess: ["eld88", "gpstab", "fmeld", "prologs_stop", "synergy_stop"],
     timeoutMs: 6000,
     // Захват = подготовительная цепочка (компания/водитель/HOS-журнал) + POST.
-    grabTimeoutMs: 25000
+    grabTimeoutMs: 25000,
+    // false — не прикладывать HOS-журнал к транзакции: минус три запроса
+    // (~1 с), но в истории транзакции не будет снимка логов, который кладёт
+    // туда платформа. Менять осознанно.
+    includeStartData: true
   },
 
   batchWindowMs: 25,
