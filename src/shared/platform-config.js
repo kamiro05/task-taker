@@ -12,6 +12,12 @@ FCT.CONFIG = {
     containerSelector: ".cdk-overlay-container mat-dialog-container",
     titleRe: "create\\s+transaction",
     presetText: "Last 8",
+    // Надпись на кнопке подтверждения. Сравнивается по НАЧАЛУ строки, потому
+    // что платформа дописывает к ней суффикс: для eld88 кнопка называется
+    // «Start transaction (Platform ELD88)». Раньше сравнивали точно — после
+    // переименования кнопка перестала находиться и диалог зависал.
+    // Если платформа снова сменит надпись, правится только эта строка.
+    confirmPrefix: "start transaction",
     confirmRe: "^\\s*(?:start\\s+transaction|save|create)\\s*$",
     confirmLabels: ["start transaction", "save", "create"],
     waitMs: 12000,

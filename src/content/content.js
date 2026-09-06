@@ -298,6 +298,7 @@
     try { confirmRe = new RegExp(d.confirmRe || "^\\s*(?:start\\s+transaction|save|create)\\s*$", "i"); } catch (e) { confirmRe = null; }
     const labels = Array.isArray(d.confirmLabels) ? d.confirmLabels : ["start transaction", "save", "create"];
     const normBtnText = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const confirmPrefix = normBtnText(d.confirmPrefix || "start transaction");
     const presetText = String(d.presetText || "Last 8").trim().toLowerCase();
     const sel = d.containerSelector + ", mat-dialog-container";
     let deadline = Date.now() + (d.waitMs || 12000);
@@ -335,13 +336,17 @@
       return tag === "button" || tag === "a" || el.getAttribute("role") === "button";
     };
 
+    // Платформа дописывает к надписи суффикс («Start transaction (Platform
+    // ELD88)»), поэтому сравниваем по началу строки, а не на равенство.
+    const isConfirmText = (t) => !!t && t.indexOf(confirmPrefix) === 0;
+
     const drillDown = (el) => {
       let cur = el;
       for (;;) {
         let next = null;
         const kids = cur.children || [];
         for (const k of kids) {
-          if (normBtnText(k.textContent) === "start transaction") { next = k; break; }
+          if (isConfirmText(normBtnText(k.textContent))) { next = k; break; }
         }
         if (!next) return cur;
         cur = next;
@@ -352,10 +357,11 @@
       if (isDisabledEl(el) || !isVisibleEl(el) || isAriaHidden(el)) return false;
       const t = btnTextOf(el);
       if (!t) return false;
-      const btnLike = isBtnLike(el);
-      if (t === "start transaction") return true;
-      if (!btnLike) return false;
-      if (t.indexOf("start transaction") !== -1) return true;
+      // Единственная ветка, доступная не-кнопкам: у платформы подтверждение —
+      // это <div class="custom-button">, а не <button> (см. раздел 17 заметок).
+      if (isConfirmText(t)) return true;
+      if (!isBtnLike(el)) return false;
+      if (t.indexOf(confirmPrefix) !== -1) return true;
       if (strongOnly) return false;
       if (hasIconInside(el)) return false;
       if (labels.indexOf(t) !== -1) return true;
