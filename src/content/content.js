@@ -218,6 +218,37 @@
     }
   }
 
+  // Закрывает открытый диалог «Create transaction» кнопкой отмены. Нужно, когда
+  // подтверждать уже нечего: без этого окно остаётся висеть на экране.
+  function closeOpenDialog() {
+    const d = C.dialog || {};
+    const want = String(d.cancelText || "cancel").trim().toLowerCase();
+    const nrm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    let titleRe;
+    try { titleRe = new RegExp(d.titleRe || "create\\s+transaction", "i"); } catch (e) { return; }
+    const sel = (d.containerSelector || "mat-dialog-container") + ", mat-dialog-container";
+    let dlg = null;
+    try {
+      dlg = [...document.querySelectorAll(sel)]
+        .filter(n => n.isConnected && isVisibleEl(n) && titleRe.test(n.textContent || "")).pop();
+    } catch (e) {}
+    if (!dlg) return;
+    let nodes;
+    try { nodes = dlg.querySelectorAll("button, [role='button'], a, div, span"); } catch (e) { return; }
+    for (const el of nodes) {
+      if (!isVisibleEl(el) || nrm(el.textContent) !== want) continue;
+      // спускаемся к самому глубокому носителю текста — клик всплывёт наверх
+      let cur = el;
+      for (;;) {
+        const kid = [...(cur.children || [])].find(k => nrm(k.textContent) === want);
+        if (!kid) break;
+        cur = kid;
+      }
+      try { dispatchClick(cur); } catch (e) {}
+      return;
+    }
+  }
+
   function watchForErrorText() {
     return new Promise((resolve) => {
       const found = () => {
@@ -305,7 +336,11 @@
     });
   }
 
-  async function autoConfirmTxnDialog() {
+  // abort — общий с вызывающим кодом флаг. Без него подтверждение продолжает
+  // жить своей жизнью после того, как захват уже признан чужим: наблюдали два
+  // лишних клика и два HTTP 400 по заявке, которую забрал другой оператор.
+  async function autoConfirmTxnDialog(abort) {
+    const stopped = () => !!(abort && abort.stop);
     const d = C.dialog || {};
     if (!d.containerSelector) return "диалог не найден";
     let titleRe;
@@ -402,6 +437,7 @@
     const resolveConfirm = (dlg) => findConfirmIn(dlg) || findConfirmGlobal();
 
     while (Date.now() < deadline) {
+      if (stopped()) return "отменено";
       const dlgs = visibleDialogs(titleRe, sel);
       const dlg = dlgs.length ? dlgs[dlgs.length - 1] : null;
       if (!dlg) {
@@ -452,6 +488,7 @@
 
       while (true) {
         await sleepV(100);
+        if (stopped()) return "отменено";
         if (!dlg.isConnected || visibleDialogs(titleRe, sel).indexOf(dlg) === -1) return "";
         const now = Date.now();
         const cb = resolveConfirm(dlg);
@@ -544,7 +581,8 @@
       const clickedAt = Date.now();
       dispatchClick(btn);
 
-      const confirmP = autoConfirmTxnDialog();
+      const abort = { stop: false };
+      const confirmP = autoConfirmTxnDialog(abort);
       let outcome = await waitForTaken(row, key);
       let confirmDiag = "";
       if (!outcome) {
@@ -565,6 +603,10 @@
         // раньше он записывался как наш и попадал в счётчики.
         const ours = await insertSucceededSince(clickedAt);
         if (!ours) {
+          // Дальше подтверждать нечего: заявка уже чужая. Без остановки цикл
+          // досылал ещё клики и получал HTTP 400, а диалог оставался открытым.
+          abort.stop = true;
+          closeOpenDialog();
           log({
             event: "error", id: key, type: task.type,
             detail: "заявку перехватил другой оператор" +
@@ -572,6 +614,7 @@
           });
           return;
         }
+        abort.stop = true;
         log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome });
         onGrabbed(key);
         return;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FlowConnect Task Taker",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Мгновенный захват новых заявок на alpha.flowconnect-group.com с приоритетами по типу задачи.",
   "minimum_chrome_version": "111",
   "icons": {

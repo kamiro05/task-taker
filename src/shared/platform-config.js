@@ -18,6 +18,9 @@ FCT.CONFIG = {
     // переименования кнопка перестала находиться и диалог зависал.
     // Если платформа снова сменит надпись, правится только эта строка.
     confirmPrefix: "start transaction",
+    // Кнопка отмены — ею закрываем диалог, если заявку успел забрать другой
+    // оператор: иначе окно остаётся висеть у пользователя на экране.
+    cancelText: "cancel",
     confirmRe: "^\\s*(?:start\\s+transaction|save|create)\\s*$",
     confirmLabels: ["start transaction", "save", "create"],
     waitMs: 12000,
