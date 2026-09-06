@@ -202,6 +202,22 @@
     return "";
   }
 
+  // Последний InsertTransactions, замеченный inject.js в ЭТОЙ вкладке. Служит
+  // доказательством авторства захвата: уход строки из «Not started» сам по себе
+  // ничего не доказывает — её мог забрать другой оператор.
+  let lastInsert = null;
+
+  async function insertSucceededSince(sinceTs) {
+    // Строка в таблице может обновиться чуть раньше, чем до нас дойдёт
+    // postMessage об ответе сервера, поэтому даём короткую отсрочку.
+    const deadline = Date.now() + 2500;
+    for (;;) {
+      if (lastInsert && lastInsert.ts >= sinceTs) return !!lastInsert.ok;
+      if (Date.now() >= deadline) return false;
+      await sleepV(150);
+    }
+  }
+
   function watchForErrorText() {
     return new Promise((resolve) => {
       const found = () => {
@@ -525,6 +541,7 @@
         return;
       }
 
+      const clickedAt = Date.now();
       dispatchClick(btn);
 
       const confirmP = autoConfirmTxnDialog();
@@ -540,6 +557,21 @@
       const hadError = outcome ? false : await watchForErrorText();
 
       if (outcome === "taken" || outcome === "status-changed" || outcome === "row-gone" || outcome === "dialog-closed") {
+        // Строка ушла из «Not started» — но это мог сделать и другой оператор,
+        // перехвативший заявку, пока мы подтверждали диалог. Сам по себе уход
+        // строки успехом не является. Наше взятие подтверждается только тем,
+        // что ИЗ ЭТОЙ вкладки ушёл InsertTransactions и сервер принял его
+        // (inject.js видит это в MAIN-мире). Без такого признака захват чужой:
+        // раньше он записывался как наш и попадал в счётчики.
+        const ours = await insertSucceededSince(clickedAt);
+        if (!ours) {
+          log({
+            event: "error", id: key, type: task.type,
+            detail: "заявку перехватил другой оператор" +
+              (lastInsert && lastInsert.ts >= clickedAt ? " (наш запрос: HTTP " + lastInsert.status + ")" : " (наш запрос не ушёл)")
+          });
+          return;
+        }
         log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome });
         onGrabbed(key);
         return;
@@ -660,6 +692,7 @@
     const msg = event.data;
     if (!msg || msg.__fct !== true) return;
     if (msg.kind === "insert-observed") {
+      lastInsert = { ts: Date.now(), ok: !!msg.ok, status: msg.status };
       log({
         event: msg.ok ? "info" : "error",
         detail: "платформа InsertTransactions → HTTP " + msg.status + (msg.ok ? " (успех)" : " — сервер отклонил/таймаут")
