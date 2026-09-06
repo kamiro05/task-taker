@@ -192,6 +192,7 @@
   async function waitForTaken(row, taskId) {
     const deadline = Date.now() + C.confirmTimeoutMs;
     while (Date.now() < deadline) {
+      if (!liveEnabled) return "";
       if (!row.isConnected) return "row-gone";
       const exec = cellText(row, C.dom.executorSelector);
       if (exec) return "taken";
@@ -220,18 +221,24 @@
 
   // Закрывает открытый диалог «Create transaction» кнопкой отмены. Нужно, когда
   // подтверждать уже нечего: без этого окно остаётся висеть на экране.
+  function findOpenDialog() {
+    const d = C.dialog || {};
+    let titleRe;
+    try { titleRe = new RegExp(d.titleRe || "create\\s+transaction", "i"); } catch (e) { return null; }
+    const sel = (d.containerSelector || "mat-dialog-container") + ", mat-dialog-container";
+    try {
+      return [...document.querySelectorAll(sel)]
+        .filter(n => n.isConnected && isVisibleEl(n) && titleRe.test(n.textContent || "")).pop() || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function closeOpenDialog() {
     const d = C.dialog || {};
     const want = String(d.cancelText || "cancel").trim().toLowerCase();
     const nrm = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
-    let titleRe;
-    try { titleRe = new RegExp(d.titleRe || "create\\s+transaction", "i"); } catch (e) { return; }
-    const sel = (d.containerSelector || "mat-dialog-container") + ", mat-dialog-container";
-    let dlg = null;
-    try {
-      dlg = [...document.querySelectorAll(sel)]
-        .filter(n => n.isConnected && isVisibleEl(n) && titleRe.test(n.textContent || "")).pop();
-    } catch (e) {}
+    const dlg = findOpenDialog();
     if (!dlg) return;
     let nodes;
     try { nodes = dlg.querySelectorAll("button, [role='button'], a, div, span"); } catch (e) { return; }
@@ -247,6 +254,19 @@
       try { dispatchClick(cur); } catch (e) {}
       return;
     }
+  }
+
+  // После удачного взятия платформа обычно закрывает диалог сама, но не всегда:
+  // у транзакций стороннего портала окно нередко остаётся висеть на экране, и
+  // оператору приходится убирать его руками. Даём платформе несколько секунд
+  // закрыться самой и только потом жмём «Cancel» — сама транзакция уже создана,
+  // отмена диалога на неё не влияет.
+  async function closeDialogAfterGrab() {
+    for (let i = 0; i < 16; i++) {
+      await sleepV(250);
+      if (!findOpenDialog()) return;
+    }
+    closeOpenDialog();
   }
 
   function watchForErrorText() {
@@ -273,25 +293,45 @@
   // Момент, когда задача попала в очередь — от него считаем время захвата.
   const detectedAt = new Map();
 
-  // Короткий сигнал при захвате: оператор может смотреть в другую вкладку.
-  // Web Audio выбран намеренно — не требует разрешения "notifications",
-  // которое пришлось бы обосновывать при публикации в Chrome Web Store.
+  // Сигнал при захвате: оператор может смотреть в другую вкладку. Web Audio
+  // выбран намеренно — не требует разрешения "notifications", которое пришлось
+  // бы обосновывать при публикации в Chrome Web Store.
+  //
+  // Звук намеренно мягкий: две негромкие ноты (C6→G6) с плавным нарастанием и
+  // долгим затуханием. Прежний вариант — одиночные 880 Гц с резкой атакой —
+  // звучал колюче. Треугольная волна вместо синуса даёт более тёплый тон,
+  // приглушённый фильтром верхних частот.
   function beep() {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
       const ctx = new Ctx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.24);
-      osc.onended = () => { try { ctx.close(); } catch (e) {} };
+      // Без жеста пользователя контекст может стартовать в suspended — тогда
+      // сигнала просто не будет слышно.
+      if (ctx.state === "suspended") { try { ctx.resume(); } catch (e) {} }
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 2000;
+      filter.connect(ctx.destination);
+
+      const note = (freq, at, dur) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.value = freq;
+        const t = ctx.currentTime + at;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.09, t + 0.04);   // плавная атака
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);  // долгий хвост
+        osc.connect(gain).connect(filter);
+        osc.start(t);
+        osc.stop(t + dur + 0.02);
+        return osc;
+      };
+
+      note(1046.5, 0, 0.18);
+      const last = note(1568, 0.11, 0.34);
+      last.onended = () => { try { ctx.close(); } catch (e) {} };
     } catch (e) {}
   }
 
@@ -340,7 +380,10 @@
   // жить своей жизнью после того, как захват уже признан чужим: наблюдали два
   // лишних клика и два HTTP 400 по заявке, которую забрал другой оператор.
   async function autoConfirmTxnDialog(abort) {
-    const stopped = () => !!(abort && abort.stop);
+    // Выключение слайдера обязано останавливать и уже начатое подтверждение:
+    // раньше цикл дожимал диалог после «выкл» и заявка всё-таки бралась.
+    // Ручной вызов __fctConfirm() без abort от liveEnabled не зависит.
+    const stopped = () => abort ? (!!abort.stop || !liveEnabled) : false;
     const d = C.dialog || {};
     if (!d.containerSelector) return "диалог не найден";
     let titleRe;
@@ -539,6 +582,8 @@
   async function performGrab(task, info) {
     const key = String(task.id);
     if (grabInFlight.has(key)) return;
+    // Захват мог быть выключен, пока задача ждала в очереди.
+    if (!liveEnabled) return;
     grabInFlight.add(key);
     try {
       if (state.cfg.dryRun) {
@@ -558,6 +603,12 @@
 
       const delay = randInt(state.cfg.humanDelayMinMs, state.cfg.humanDelayMaxMs);
       if (delay > 0) await sleepV(delay);
+
+      // Пауза «под человека» — самый вероятный момент для выключения слайдера.
+      if (!liveEnabled) {
+        log({ event: "skip", id: key, type: task.type, detail: "захват выключен" });
+        return;
+      }
 
       const row = findRowById(key);
 
@@ -592,6 +643,15 @@
           if (!outcome) outcome = "dialog-closed";
         }
       }
+      // Слайдер выключили посреди подтверждения: бросаем диалог, а не дожидаемся
+      // таймаутов, которые всё равно кончатся записью «ошибка».
+      if (!outcome && !liveEnabled) {
+        abort.stop = true;
+        closeOpenDialog();
+        log({ event: "skip", id: key, type: task.type, detail: "захват выключен во время подтверждения" });
+        return;
+      }
+
       const hadError = outcome ? false : await watchForErrorText();
 
       if (outcome === "taken" || outcome === "status-changed" || outcome === "row-gone" || outcome === "dialog-closed") {
@@ -617,6 +677,7 @@
         abort.stop = true;
         log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome });
         onGrabbed(key);
+        closeDialogAfterGrab();
         return;
       }
 

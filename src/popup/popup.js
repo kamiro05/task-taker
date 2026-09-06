@@ -58,28 +58,24 @@
     $("statLast").textContent = s.lastAt ? fmtTs(s.lastAt) : "—";
   }
 
+  // Состояние спрашиваем у воркера: он знает про ВСЕ вкладки платформы. Раньше
+  // опрашивалась только активная вкладка, и если попап открыт не на странице
+  // задач — слайдер показывал «выключено» при работающем захвате.
   async function syncEnabledFromTab() {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const url = (tab && tab.url) || "";
-      if (!url.includes("alpha.flowconnect-group.com") || !tab.id) return;
       const res = await Promise.race([
-        chrome.tabs.sendMessage(tab.id, { type: "fct-get-state" }).catch(() => null),
+        chrome.runtime.sendMessage({ type: "fct-enabled-state" }).catch(() => null),
         wait(700)
       ]);
       if (res && res.ok) $("enabled").checked = !!res.enabled;
     } catch (e) {}
   }
 
-  // Бейдж SW не трогаем: о состоянии ему сообщают сами вкладки (fct-tab-state),
-  // иначе после перезагрузки страницы бейдж расходится с реальностью.
+  // Рассылку делает воркер. Попап уничтожается сразу при закрытии и обрывает
+  // свои незавершённые await — из-за этого выключение долетало не до всех
+  // вкладок и захват продолжал работать при выключенном на вид слайдере.
   async function broadcastEnabled(value) {
-    let tabs = [];
-    try { tabs = await chrome.tabs.query({ url: "https://alpha.flowconnect-group.com/*" }); } catch (e) {}
-    for (const t of tabs) {
-      if (!t.id) continue;
-      try { await chrome.tabs.sendMessage(t.id, { type: "fct-set-enabled", value }); } catch (e) {}
-    }
+    try { await chrome.runtime.sendMessage({ type: "fct-set-enabled-all", value }); } catch (e) {}
   }
 
   async function save() {

@@ -28,6 +28,9 @@ FCT.EngineCore = (function () {
     function flush() {
       flushTimer = null;
       if (pending.length === 0) return;
+      // Захват могли выключить в окне между submit и flush — очередь
+      // выбрасываем, иначе уже принятые задачи всё равно уходили в работу.
+      if (!cfg.enabled) { pending.length = 0; return; }
       pending.sort((a, b) =>
         a.prio - b.prio || a.seq - b.seq
       );
