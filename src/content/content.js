@@ -1047,6 +1047,7 @@
   let panelState = null;
   let panelCount = null;
   let todayCount = 0;
+  let panelWasOn = false;
 
   function destroyPanel() {
     if (!panelHost) return;
@@ -1109,32 +1110,53 @@
     if (!document.body) return;
     const host = document.createElement("div");
     host.id = PANEL_ID;
-    host.style.cssText = "all:initial;position:fixed;right:" + PANEL_MARGIN + "px;bottom:" +
+    // По умолчанию — левый нижний угол: справа внизу платформа держит пагинацию
+    // и «Total», и панель ложилась прямо на них. Слева на этой строке пусто.
+    host.style.cssText = "all:initial;position:fixed;left:" + PANEL_MARGIN + "px;bottom:" +
       PANEL_MARGIN + "px;z-index:2147483000;";
     const sh = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
+    // Material You: тональные заливки вместо ярких, форма-таблетка, ровно один
+    // уровень тени, никаких градиентов и обводок. Состояние несёт сам цвет
+    // подложки — читается боковым зрением, вчитываться в надпись не нужно.
+    // Подложки светлые: интерфейс платформы светлый, тёмная плашка смотрелась
+    // в нём заплаткой.
     style.textContent =
-      ".p{display:flex;align-items:center;gap:8px;padding:5px;border-radius:999px;" +
-      "background:rgba(23,28,35,.9);border:1px solid #2a323d;color:#e6eaf0;" +
-      "font:600 12px/1 system-ui,'Segoe UI',sans-serif;cursor:pointer;user-select:none;" +
-      "box-shadow:0 3px 10px rgba(0,0,0,.3);opacity:.5;" +
-      "transition:opacity .15s ease,padding .15s ease,border-color .15s ease}" +
-      ".p:hover,.p.drag{opacity:1;padding:7px 12px 7px 8px;border-color:#3a4451}" +
-      ".tx,.cnt{display:none;white-space:nowrap}" +
-      ".p:hover .tx,.p:hover .cnt,.p.drag .tx{display:inline}" +
-      ".p.drag{cursor:grabbing}" +
-      ".dot{width:10px;height:10px;border-radius:50%;background:#6b7480;flex:none;transition:background .15s ease}" +
-      ".p.on .dot{background:#22c55e}" +
-      ".p.dry .dot{background:#38bdf8}" +
-      ".p.bad{border-color:#ef4444;opacity:.85}" +
-      ".p.bad .dot{background:#ef4444;animation:fctPulse 1.4s ease-in-out infinite}" +
-      // Остановленный движок разворачиваем всегда: это единственное состояние,
-      // которое требует действия пользователя, и наводить мышь ради него нельзя.
-      ".p.dead{opacity:1;padding:7px 12px 7px 8px;border-color:#f59e0b}" +
-      ".p.dead .tx{display:inline;color:#f59e0b}" +
-      ".p.dead .dot{background:#f59e0b}" +
+      ".p{display:flex;align-items:center;gap:8px;padding:7px 14px 7px 10px;border-radius:999px;" +
+      "background:#e5e7eb;color:#3f4348;" +
+      "font:500 13px/1 system-ui,Roboto,'Segoe UI',sans-serif;letter-spacing:.1px;" +
+      "cursor:pointer;user-select:none;white-space:nowrap;" +
+      "box-shadow:0 1px 3px rgba(0,0,0,.16);" +
+      "transition:background-color .2s ease,color .2s ease}" +
+      // Слой состояния поверх подложки — так Material You показывает наведение,
+      // вместо смены самого цвета.
+      ".p:hover{background-image:linear-gradient(rgba(0,0,0,.06),rgba(0,0,0,.06))}" +
+      ".p.drag{cursor:grabbing;box-shadow:0 3px 8px rgba(0,0,0,.22)}" +
+      ".dot{width:8px;height:8px;border-radius:50%;background:#9aa0a6;flex:none;transition:background-color .2s ease}" +
+
+      ".p.on{background:#c6f0d2;color:#0b5b2b}" +
+      ".p.on .dot{background:#1c8a45}" +
+
+      ".p.dry{background:#cfe6f7;color:#0d4a6b}" +
+      ".p.dry .dot{background:#1a7fb8}" +
+
+      ".p.bad{background:#ffdad6;color:#8c1d18}" +
+      ".p.bad .dot{background:#c0392b;animation:fctPulse 1.6s ease-in-out infinite}" +
+
+      ".p.dead{background:#ffdfb0;color:#5c4200}" +
+      ".p.dead .dot{background:#a06800}" +
+
+      // Счётчик за смену — только когда есть что показывать: пустой «· 0» лишь
+      // удлиняет плашку.
+      ".cnt{opacity:.65}" +
+      ".cnt:empty{display:none}" +
+
+      // Подтверждение клика: мягкий засвет вместо подпрыгивания — панель стоит
+      // в углу, и резкое движение там только дёргает взгляд.
+      ".p.flash{animation:fctFlash .5s ease-out}" +
       "@keyframes fctPulse{0%,100%{opacity:1}50%{opacity:.35}}" +
-      ".cnt{color:#8b95a3;font-weight:500}";
+      "@keyframes fctFlash{0%{background-image:linear-gradient(rgba(255,255,255,.85),rgba(255,255,255,.85))}" +
+      "100%{background-image:linear-gradient(rgba(255,255,255,0),rgba(255,255,255,0))}}";
     const box = document.createElement("div");
     box.className = "p";
     const dot = document.createElement("span");
@@ -1201,13 +1223,22 @@
     panelBox.classList.toggle("dry", on && dry);
     panelBox.classList.toggle("bad", healthBad);
     panelBox.classList.toggle("dead", dead);
-    panelState.textContent = dead ? "ОСТАНОВЛЕН · F5" : (on ? (dry ? "DRY RUN" : "ЗАХВАТ") : "ВЫКЛ");
-    panelCount.textContent = todayCount ? "· " + todayCount + " за смену" : "";
+    panelState.textContent = dead ? "Остановлен · F5" : (on ? (dry ? "Dry run" : "Захват") : "Выкл");
+    panelCount.textContent = todayCount ? "· " + todayCount : "";
     panelBox.title = dead
       ? "Расширение перезагрузилось — обновите страницу (F5)"
       : (healthBad
         ? "Проверьте платформу: разметка могла измениться"
-        : "Клик — вкл/выкл захват (Ctrl+Shift+Y). Перетащите, если мешает");
+        : "Клик — вкл/выкл захват (F9). Перетащите, если мешает" +
+          (todayCount ? ". Взято за смену: " + todayCount : ""));
+
+    // Вспышка только в момент включения, а не на каждой перерисовке.
+    if (on && !panelWasOn) {
+      panelBox.classList.remove("flash");
+      void panelBox.offsetWidth;
+      panelBox.classList.add("flash");
+    }
+    panelWasOn = on;
   }
 
   function togglePanelCapture() {
@@ -1236,11 +1267,24 @@
     try { console.info("[task taker] движок остановлен: " + reason); } catch (e) {}
   }
 
-  const orphanWatch = setInterval(() => {
+  function watchTick() {
+    if (dead) return;
     if (contextAlive()) { syncPanel(); markState(); return; }
     clearInterval(orphanWatch);
     shutdown("расширение перезагружено или обновлено — перезагрузите страницу платформы");
-  }, 2000);
+  }
+
+  const orphanWatch = setInterval(watchTick, 2000);
+
+  // В фоновой вкладке Chrome душит таймеры вплоть до одного срабатывания в
+  // минуту. Захвату это не вредит — он останавливается синхронной проверкой
+  // armed(), — но панель до минуты показывала бы устаревшее состояние ровно
+  // тогда, когда должна звать нажать F5. Поэтому проверяем ещё и в момент
+  // возвращения к вкладке.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") watchTick();
+  });
+  window.addEventListener("focus", watchTick);
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;

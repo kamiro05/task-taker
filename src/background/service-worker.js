@@ -113,8 +113,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   restoreTabs().then(paintBadge);
 });
 
-// Ctrl+Shift+Y: выключить захват, не открывая попап. Клавишу можно сменить в
-// chrome://extensions/shortcuts.
+// Горячая клавиша переключает захват, не открывая попап. Клавиша по умолчанию
+// НЕ задана намеренно: в манифесте Chrome требует модификатор (Ctrl или Alt) и
+// отклоняет одиночную «F9» — расширение с такой строкой просто не грузится.
+// Одиночные F-клавиши разрешены только при ручном назначении пользователем на
+// chrome://extensions/shortcuts, туда мы за ней и отправляем.
 chrome.commands.onCommand.addListener((cmd) => {
   if (cmd !== "toggle-capture") return;
   restoreTabs().then(() => broadcastEnabled(enabledTabs.size === 0));

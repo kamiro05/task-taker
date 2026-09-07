@@ -16,12 +16,31 @@
     $("delayMax").value = cfg.humanDelayMaxMs;
     renderPriorities();
     renderModeHint();
+    await renderShortcut();
     await renderStats();
     await renderHealth();
     await renderLog();
     await syncEnabledFromTab();
     renderStatus();
   }
+
+  // Клавиши по умолчанию нет: Chrome требует в манифесте модификатор (Ctrl или
+  // Alt) и отклоняет одиночную F-клавишу — расширение с ней просто не грузится.
+  // Одиночные F-клавиши разрешены только при ручном назначении, поэтому ведём
+  // пользователя на страницу горячих клавиш Chrome.
+  async function renderShortcut() {
+    let shortcut = "";
+    try {
+      const cmds = await chrome.commands.getAll();
+      const c = cmds.find(x => x.name === "toggle-capture");
+      shortcut = (c && c.shortcut) || "";
+    } catch (e) {}
+    $("shortcutBtn").textContent = shortcut || "назначить";
+  }
+
+  $("shortcutBtn").addEventListener("click", () => {
+    chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
+  });
 
   // Диагноз ставят вкладки; попап только показывает последний.
   async function renderHealth() {
