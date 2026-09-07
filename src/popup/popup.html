@@ -80,15 +80,6 @@
   </section>
 
   <section>
-    <h2>Проверка платформы</h2>
-    <p class="hint">Прогоняет все селекторы по открытой вкладке платформы.
-      Нужна, когда захват «молчит»: платформа меняет разметку без предупреждения,
-      и сломанный селектор внешне выглядит как «сегодня нет заявок».</p>
-    <button id="diagBtn" class="ghost wide">Проверить платформу</button>
-    <ul id="diagList" class="diaglist"></ul>
-  </section>
-
-  <section>
     <h2>Приоритеты типов</h2>
     <p class="hint">Выше в списке — раньше берётся. Снятая галочка — никогда не брать.
       Комбо-задача матчится только точным набором чипов: «new shift pti» — отдельный тип;
@@ -102,13 +93,21 @@
 
   <section>
     <h2>Прочее</h2>
-    <label class="row">
+    <div class="row">
       <span>Неизвестные типы</span>
-      <select id="unknownPolicy">
-        <option value="skip">пропускать</option>
-        <option value="grab">брать (после известных)</option>
-      </select>
-    </label>
+      <!-- Не <select>: системный список рисуется светлым и мимо темы попапа.
+           Разметка ниже — источник данных для initDropdown() в popup.js. -->
+      <div class="dd" id="unknownPolicy" data-value="skip">
+        <button type="button" class="dd-btn" aria-haspopup="listbox" aria-expanded="false">
+          <span class="dd-val"></span>
+          <span class="dd-caret" aria-hidden="true"></span>
+        </button>
+        <ul class="dd-list" role="listbox" tabindex="-1" hidden>
+          <li role="option" data-value="skip">пропускать</li>
+          <li role="option" data-value="grab">брать после известных</li>
+        </ul>
+      </div>
+    </div>
     <label class="row">
       <span>Задержка перед кликом, мс</span>
       <span class="pair">

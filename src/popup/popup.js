@@ -11,7 +11,7 @@
     $("portalEld88").checked = !!(cfg.portals && cfg.portals.eld88 !== false);
     $("portalFlow").checked = !!(cfg.portals && cfg.portals.flow !== false);
     $("enabled").checked = false;
-    $("unknownPolicy").value = cfg.unknownPolicy || "skip";
+    unknownPolicyDd.set(cfg.unknownPolicy || "skip");
     $("delayMin").value = cfg.humanDelayMinMs;
     $("delayMax").value = cfg.humanDelayMaxMs;
     renderPriorities();
@@ -50,7 +50,7 @@
     $("healthBanner").hidden = !bad;
     if (bad) {
       $("healthText").textContent = (h.reason || "разметка платформы изменилась") +
-        " — захват может не работать. Нажмите «Проверить платформу».";
+        " — захват может не работать. Проверьте журнал ниже.";
     }
   }
 
@@ -265,8 +265,84 @@
     await save();
   });
 
-  $("unknownPolicy").addEventListener("change", async (e) => {
-    cfg.unknownPolicy = e.target.value;
+  // Своё выпадающее меню вместо <select>: системный список Chrome рисует
+  // средствами ОС — светлым, своим шрифтом, мимо темы попапа. Работает как
+  // <select> и с клавиатуры: Enter/Пробел/стрелки открывают, стрелки водят по
+  // пунктам, Enter выбирает, Esc закрывает и возвращает фокус на кнопку.
+  function initDropdown(id, onChange) {
+    const root = $(id);
+    const btn = root.querySelector(".dd-btn");
+    const val = root.querySelector(".dd-val");
+    const list = root.querySelector(".dd-list");
+    const items = [...list.querySelectorAll("[role='option']")];
+    let cursor = 0;
+
+    const paint = () => {
+      const v = root.dataset.value;
+      items.forEach((li, i) => {
+        const on = li.dataset.value === v;
+        li.setAttribute("aria-selected", on ? "true" : "false");
+        li.classList.toggle("active", i === cursor);
+        if (on) val.textContent = li.textContent;
+      });
+    };
+
+    const open = () => {
+      cursor = Math.max(0, items.findIndex(li => li.dataset.value === root.dataset.value));
+      list.hidden = false;
+      root.classList.add("open");
+      btn.setAttribute("aria-expanded", "true");
+      paint();
+    };
+
+    const close = (focusBtn) => {
+      list.hidden = true;
+      root.classList.remove("open");
+      btn.setAttribute("aria-expanded", "false");
+      if (focusBtn) btn.focus();
+    };
+
+    const pick = (li) => {
+      root.dataset.value = li.dataset.value;
+      paint();
+      close(true);
+      onChange(li.dataset.value);
+    };
+
+    btn.addEventListener("click", () => { list.hidden ? open() : close(false); });
+
+    for (const li of items) {
+      li.addEventListener("click", () => pick(li));
+      li.addEventListener("mousemove", () => { cursor = items.indexOf(li); paint(); });
+    }
+
+    root.addEventListener("keydown", (e) => {
+      if (list.hidden) {
+        if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          open();
+        }
+        return;
+      }
+      if (e.key === "Escape") { e.preventDefault(); close(true); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); cursor = (cursor + 1) % items.length; paint(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); cursor = (cursor - 1 + items.length) % items.length; paint(); }
+      else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(items[cursor]); }
+    });
+
+    // Клик мимо меню закрывает его — как у нативного списка.
+    document.addEventListener("click", (e) => {
+      if (!list.hidden && !root.contains(e.target)) close(false);
+    });
+
+    return {
+      set(v) { root.dataset.value = v; paint(); },
+      get() { return root.dataset.value; }
+    };
+  }
+
+  const unknownPolicyDd = initDropdown("unknownPolicy", async (v) => {
+    cfg.unknownPolicy = v;
     await save();
   });
 
@@ -342,71 +418,6 @@
       setTimeout(renderLog, 600);
     } catch (e) {
       setStatus("ошибка: " + ((e && e.message) || e), "err");
-    }
-  });
-
-  // Проверяем ту вкладку платформы, которая открыта. Активная в приоритете:
-  // если их несколько, пользователь имеет в виду ту, на которую смотрит.
-  async function platformTab() {
-    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (active && (active.url || "").includes("alpha.flowconnect-group.com")) return active;
-    const tabs = await chrome.tabs.query({ url: "https://alpha.flowconnect-group.com/*" });
-    return tabs[0] || null;
-  }
-
-  function diagRow(cls, mark, label, detail) {
-    const li = document.createElement("li");
-    li.className = cls;
-    const m = document.createElement("span");
-    m.className = "mark";
-    m.textContent = mark;
-    const l = document.createElement("span");
-    l.className = "lbl";
-    l.textContent = label;
-    const d = document.createElement("span");
-    d.className = "det";
-    d.title = detail;
-    d.textContent = detail;
-    li.append(m, l, d);
-    return li;
-  }
-
-  function renderDiagnostics(res) {
-    const ul = $("diagList");
-    ul.textContent = "";
-    if (!res || !res.ok) {
-      ul.appendChild(diagRow("bad", "✕", "Нет связи", "движок не отвечает — перезагрузите страницу платформы (F5)"));
-      return;
-    }
-    for (const c of res.checks) {
-      if (c.ok === true) ul.appendChild(diagRow("ok", "✓", c.label, c.detail));
-      else if (c.ok === false) ul.appendChild(diagRow("bad", "✕", c.label, c.detail));
-      else ul.appendChild(diagRow("skip", "•", c.label, c.detail));
-    }
-    const bad = res.checks.filter(c => c.ok === false).length;
-    const li = document.createElement("li");
-    li.className = "summary";
-    li.textContent = bad
-      ? bad + " " + (bad === 1 ? "проверка не прошла" : "проверок не прошло") + " — правьте platform-config.js"
-      : "все проверки пройдены";
-    ul.appendChild(li);
-  }
-
-  $("diagBtn").addEventListener("click", async () => {
-    const ul = $("diagList");
-    ul.textContent = "";
-    ul.appendChild(diagRow("skip", "•", "Проверяю", "…"));
-    try {
-      const tab = await platformTab();
-      if (!tab) {
-        renderDiagnostics(null);
-        return;
-      }
-      const res = await chrome.tabs.sendMessage(tab.id, { type: "fct-diagnose" }).catch(() => null);
-      renderDiagnostics(res);
-      await renderHealth();
-    } catch (e) {
-      renderDiagnostics(null);
     }
   });
 

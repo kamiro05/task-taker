@@ -231,7 +231,7 @@ input[type="checkbox"].switch:checked::after { left: 18px; }
   font-size: 16px; font-weight: 700; cursor: pointer;
 }
 
-select, input[type="number"] {
+input[type="number"] {
   background: var(--bg);
   border: 1px solid var(--line);
   color: var(--text);
@@ -239,6 +239,66 @@ select, input[type="number"] {
   padding: 4px 7px;
   font: inherit;
 }
+
+/* Своё выпадающее меню: нативный <select> Chrome рисует средствами ОС —
+   светлым списком системным шрифтом, который темой попапа не управляется. */
+.dd { position: relative; }
+.dd-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 5px 9px;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.dd-val { white-space: nowrap; }
+.dd-btn:hover { border-color: #3a4451; }
+.dd-btn:focus-visible { outline: none; border-color: var(--accent); }
+.dd.open .dd-btn { border-color: var(--accent); background: var(--panel-2); }
+
+.dd-caret {
+  width: 0; height: 0;
+  flex: none;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--muted);
+  transition: transform .15s ease;
+}
+.dd.open .dd-caret { transform: rotate(180deg); }
+
+.dd-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 5px);
+  z-index: 20;
+  min-width: 100%;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .55);
+}
+.dd-list[hidden] { display: none; }
+.dd-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dd-list li.active { background: rgba(255, 255, 255, .07); }
+.dd-list li[aria-selected="true"] { color: var(--accent); }
+.dd-list li[aria-selected="true"]::after { content: "✓"; margin-left: auto; font-weight: 700; }
 input[type="number"] { width: 64px; }
 .pair { display: flex; align-items: center; gap: 4px; color: var(--muted); }
 
@@ -309,33 +369,6 @@ button.ghost:hover { color: var(--text); border-color: #3a4451; }
   font-size: 12px;
   flex: none;
 }
-
-.diaglist {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-  font-size: 11.5px;
-}
-.diaglist li {
-  display: flex;
-  gap: 7px;
-  align-items: baseline;
-  padding: 4px 6px;
-  margin-bottom: 3px;
-  border-radius: 6px;
-  border-left: 3px solid var(--line);
-  background: var(--bg);
-}
-.diaglist li.ok { border-left-color: var(--accent); }
-.diaglist li.bad { border-left-color: var(--danger); }
-.diaglist li.skip { border-left-color: var(--line); opacity: .7; }
-.diaglist .mark { flex: none; width: 12px; font-weight: 800; }
-.diaglist li.ok .mark { color: var(--accent); }
-.diaglist li.bad .mark { color: var(--danger); }
-.diaglist li.skip .mark { color: var(--muted); }
-.diaglist .lbl { flex: none; font-weight: 600; }
-.diaglist .det { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.diaglist .summary { justify-content: center; border-left-color: transparent; color: var(--muted); }
 
 /* display:flex у класса перебивает браузерный [hidden]{display:none} —
    без этой строки скрытый баннер продолжает висеть на экране. */

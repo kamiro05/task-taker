@@ -912,16 +912,16 @@
     }, 15000);
   }
 
-  // ─────────────────────────── Самодиагностика ────────────────────────────
+  // ──────────────────────────── Сторож поломок ─────────────────────────────
   //
   // Платформа дважды меняла разметку под нами, и оба раза захват ломался МОЛЧА:
   // кнопка не находится — заявка просто не берётся, в журнале одна строчка
   // среди сотни, бейдж зелёный. Узнавали об этом к концу смены.
   //
-  // Отсюда два механизма: активная проверка (кнопка в попапе прогоняет все
-  // селекторы по живой странице) и пассивный сторож (считает подряд идущие
-  // СТРУКТУРНЫЕ отказы и поднимает красный бейдж). Структурный — это «не нашёл
-  // элемент», а не «заявку увёл другой оператор»: второе в порядке вещей.
+  // Сторож считает подряд идущие СТРУКТУРНЫЕ отказы — «не нашёл элемент», а не
+  // «заявку увёл другой оператор»: второе в порядке вещей — и поднимает красный
+  // бейдж с баннером в попапе. Ручная кнопка «Проверить платформу» здесь была,
+  // но занимала в попапе целый экран ради того, что сторож ловит сам.
 
   const HEALTH_KEY = FCT.STORAGE_KEYS.health;
   let healthBad = false;
@@ -954,82 +954,6 @@
     } catch (e) {
       return false;
     }
-  }
-
-  function check(label, ok, detail) {
-    return { label, ok, detail: detail || "" };
-  }
-
-  // ok === null — «не проверено», а не «сломано»: диалог виден только когда он
-  // открыт, и путать это с поломкой нельзя.
-  function runDiagnostics() {
-    const checks = [];
-    const onTasks = isTasksPage();
-
-    const table = (() => { try { return document.querySelector(C.dom.tableSelector); } catch (e) { return null; } })();
-    checks.push(check("Таблица заявок", onTasks ? !!table : null,
-      table ? C.dom.tableSelector : (onTasks ? "не найдена: " + C.dom.tableSelector : "откройте страницу задач")));
-
-    const bridge = document.documentElement.getAttribute("data-fct-bridge") === "1";
-    checks.push(check("Мост MAIN-мира", bridge,
-      bridge ? "ответы сервера видны" : "inject.js не внедрён — захваты будут считаться чужими"));
-
-    const rows = queryRows(document);
-    checks.push(check("Строки", onTasks ? rows.length > 0 : null,
-      rows.length ? rows.length + " шт." : (onTasks ? "ни одной: " + C.dom.rowSelector : "—")));
-
-    const row = rows[0];
-    if (row) {
-      const types = extractTypes(row);
-      checks.push(check("Типы задачи", types.length > 0,
-        types.length ? types.join(", ") : "пусто: " + C.dom.taskCellSelector));
-
-      const st = extractStatus(row);
-      checks.push(check("Статус", !!st, st || "пусто: " + C.dom.statusTextSelector));
-
-      let execCell = null;
-      try { execCell = row.querySelector(C.dom.executorSelector); } catch (e) {}
-      checks.push(check("Исполнитель", !!execCell,
-        execCell ? (cellText(row, C.dom.executorSelector) || "пусто (заявка свободна)") : "нет ячейки: " + C.dom.executorSelector));
-
-      const portal = portalOf(row);
-      checks.push(check("Портал", !!portal, portal || "пусто: " + C.dom.portalSelector));
-
-      const basis = [
-        cellText(row, C.dom.createDateSelector),
-        cellText(row, C.dom.companySelector),
-        cellText(row, C.dom.driverSelector)
-      ].filter(Boolean);
-      checks.push(check("Ключ заявки", basis.length === 3,
-        basis.length === 3 ? "дата + компания + водитель" : "собран из " + basis.length + "/3 полей — возможны ложные дубли"));
-
-      const btn = findTakeButton(row);
-      checks.push(check("Кнопка захвата", !!btn,
-        btn ? (btn.className || btn.tagName.toLowerCase()) : "не найдена: " + C.takeButton.transactionCellSelector));
-    }
-
-    // Диалог проверяем, только если он сейчас открыт: именно его надписи
-    // платформа переименовывала.
-    const dlg = findOpenDialog();
-    if (!dlg) {
-      checks.push(check("Диалог транзакции", null, "не открыт — откройте окно Create transaction и проверьте снова"));
-    } else {
-      const d = C.dialog || {};
-      const wantCancel = normBtnText(d.cancelText || "cancel");
-      let nodes = [];
-      try { nodes = [...dlg.querySelectorAll("button, [role='button'], a, div, span")]; } catch (e) {}
-      const visible = nodes.filter(isVisibleEl);
-      const confirmEl = visible.find(el => isConfirmLabel(normBtnText(el.textContent)));
-      const cancelEl = visible.find(el => normBtnText(el.textContent) === wantCancel);
-      checks.push(check("Кнопка подтверждения", !!confirmEl,
-        confirmEl ? "«" + normBtnText(confirmEl.textContent) + "»" : "нет надписи, начинающейся с «" + normBtnText(d.confirmPrefix) + "»"));
-      checks.push(check("Кнопка отмены", !!cancelEl,
-        cancelEl ? "«" + wantCancel + "»" : "не найдена — окно нечем закрыть"));
-    }
-
-    const failed = checks.filter(c => c.ok === false);
-    if (onTasks) setHealth(failed.length === 0, failed.length ? failed[0].label + ": " + failed[0].detail : "");
-    return { url: location.href, onTasks, checks };
   }
 
   // ───────────────────────── Панель на странице ────────────────────────────
@@ -1332,8 +1256,6 @@
       try {
         sendResponse({ ok: true, enabled: liveEnabled, armed: armed(), dryRun: !!state.cfg.dryRun });
       } catch (e) {}
-    } else if (msg.type === "fct-diagnose") {
-      try { sendResponse(Object.assign({ ok: true }, runDiagnostics())); } catch (e) {}
     }
   });
 
