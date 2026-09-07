@@ -3,6 +3,8 @@ const BADGE_COLOR_OFF = "#9ca3af";
 
 const BADGE_COLOR_BAD = "#ef4444";
 
+// Единственный адрес, с которым работает расширение. Дублирует origin из
+// platform-config.js: воркер грузится отдельным модулем и его не импортирует.
 const TABS_URL = "https://alpha.flowconnect-group.com/*";
 const SESSION_KEY = "enabledTabs";
 const CAPTURE_KEY = "captureOn";

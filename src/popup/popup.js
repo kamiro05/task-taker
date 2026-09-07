@@ -399,7 +399,8 @@
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab || !tab.id) { setStatus("вкладка не найдена", "err"); return; }
       const url = tab.url || "";
-      if (!url.includes("alpha.flowconnect-group.com")) {
+      // Адрес платформы держим в одном месте — в platform-config.js.
+      if (!url.startsWith(FCT.CONFIG.origin)) {
         setStatus("это не вкладка платформы", "err");
         return;
       }

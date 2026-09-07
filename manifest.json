@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "FlowConnect Task Taker",
-  "version": "1.0.0",
-  "description": "Мгновенный захват новых заявок на alpha.flowconnect-group.com с приоритетами по типу задачи.",
+  "name": "Task Taker",
+  "version": "1.0.1",
+  "description": "Мгновенно берёт новые рабочие заявки по вашему списку приоритетов типов задач.",
   "minimum_chrome_version": "111",
   "icons": {
     "16": "icons/icon16.png",
@@ -22,7 +22,7 @@
   },
   "action": {
     "default_popup": "src/popup/popup.html",
-    "default_title": "FlowConnect Task Taker",
+    "default_title": "Task Taker",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
