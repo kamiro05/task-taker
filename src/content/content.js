@@ -1223,10 +1223,13 @@
     panelBox.classList.toggle("dry", on && dry);
     panelBox.classList.toggle("bad", healthBad);
     panelBox.classList.toggle("dead", dead);
-    panelState.textContent = dead ? "Остановлен · F5" : (on ? (dry ? "Dry run" : "Захват") : "Выкл");
+    // Не «Остановлен · F5»: пользователь прочёл это как «остановлен клавишей
+    // F5». Надпись должна называть действие, а не намекать на него.
+    panelState.textContent = dead ? "Обновите страницу" : (on ? (dry ? "Dry run" : "Захват") : "Выкл");
     panelCount.textContent = todayCount ? "· " + todayCount : "";
     panelBox.title = dead
-      ? "Расширение перезагрузилось — обновите страницу (F5)"
+      ? "Расширение обновилось, и движок в этой вкладке отключён. Нажмите F5 " +
+        "или кликните здесь — захват заработает снова"
       : (healthBad
         ? "Проверьте платформу: разметка могла измениться"
         : "Клик — вкл/выкл захват (F9). Перетащите, если мешает" +
