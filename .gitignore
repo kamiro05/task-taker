@@ -10,3 +10,6 @@ node_modules/
 fct-insert-body.json
 real-insert-body.json
 resp-*.json
+
+# Собранные пакеты для Chrome Web Store — артефакты сборки.
+build/
