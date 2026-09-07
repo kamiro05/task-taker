@@ -15,7 +15,6 @@
     $("delayMin").value = cfg.humanDelayMinMs;
     $("delayMax").value = cfg.humanDelayMaxMs;
     renderPriorities();
-    renderModeHint();
     await renderShortcut();
     await renderStats();
     await renderHealth();
@@ -166,11 +165,6 @@
       li.append(pos, cb, name, up, down, del);
       ul.appendChild(li);
     });
-  }
-
-  function renderModeHint() {
-    $("modeHint").textContent =
-      "Захват: клик по кнопке «Start Transaction» с автоподтверждением диалога";
   }
 
   async function move(i, dir) {

@@ -113,17 +113,6 @@ h2 {
 .logfilter input { margin: 0; cursor: pointer; }
 .loglist .empty { justify-content: center; color: var(--muted); border-left-color: transparent; }
 
-.mode-hint {
-  margin-top: 6px;
-  padding: 7px 9px;
-  border-radius: 8px;
-  border: 1px solid rgba(56, 189, 248, .25);
-  background: rgba(56, 189, 248, .08);
-  color: var(--accent-2);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
 .row {
   display: flex;
   align-items: center;
@@ -132,7 +121,6 @@ h2 {
   padding: 5px 0;
 }
 
-.row small { color: var(--muted); }
 .main-row { font-weight: 600; padding-bottom: 9px; margin-bottom: 3px; border-bottom: 1px solid var(--line); }
 
 input[type="checkbox"].switch {
