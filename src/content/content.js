@@ -1122,9 +1122,12 @@
     // Подложки светлые: интерфейс платформы светлый, тёмная плашка смотрелась
     // в нём заплаткой.
     style.textContent =
-      ".p{display:flex;align-items:center;gap:8px;padding:7px 14px 7px 10px;border-radius:999px;" +
+      // Размер подогнан под кнопки платформы: её «Limit: 100» — 90×37, панель
+      // держим чуть ниже (34), чтобы читалась как элемент того же интерфейса,
+      // но не спорила с ним.
+      ".p{display:flex;align-items:center;gap:9px;padding:10px 16px 10px 12px;border-radius:999px;" +
       "background:#e5e7eb;color:#3f4348;" +
-      "font:500 13px/1 system-ui,Roboto,'Segoe UI',sans-serif;letter-spacing:.1px;" +
+      "font:500 14px/1 system-ui,Roboto,'Segoe UI',sans-serif;letter-spacing:.1px;" +
       "cursor:pointer;user-select:none;white-space:nowrap;" +
       "box-shadow:0 1px 3px rgba(0,0,0,.16);" +
       "transition:background-color .2s ease,color .2s ease}" +
@@ -1132,7 +1135,7 @@
       // вместо смены самого цвета.
       ".p:hover{background-image:linear-gradient(rgba(0,0,0,.06),rgba(0,0,0,.06))}" +
       ".p.drag{cursor:grabbing;box-shadow:0 3px 8px rgba(0,0,0,.22)}" +
-      ".dot{width:8px;height:8px;border-radius:50%;background:#9aa0a6;flex:none;transition:background-color .2s ease}" +
+      ".dot{width:9px;height:9px;border-radius:50%;background:#9aa0a6;flex:none;transition:background-color .2s ease}" +
 
       ".p.on{background:#c6f0d2;color:#0b5b2b}" +
       ".p.on .dot{background:#1c8a45}" +
