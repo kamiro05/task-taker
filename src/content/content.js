@@ -1069,44 +1069,124 @@
     else destroyPanel();
   }
 
+  // Панель перекрывала интерфейс платформы, поэтому в покое она свёрнута до
+  // точки 20×20 и притушена; надписи разворачиваются только под курсором.
+  // Плюс её можно перетащить: любое фиксированное место что-нибудь да закроет,
+  // а так пользователь сам решает, где ей не мешать. Позиция запоминается.
+  const PANEL_POS_KEY = "__fct_panel_pos";
+  const PANEL_MARGIN = 12;
+
+  function savedPanelPos() {
+    try {
+      const raw = localStorage.getItem(PANEL_POS_KEY);
+      if (!raw) return null;
+      const p = JSON.parse(raw);
+      return (p && isFinite(p.x) && isFinite(p.y)) ? p : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Позицию всегда загоняем в границы окна: сохранённая могла остаться от
+  // большего монитора, и панель оказалась бы за краем экрана.
+  function placePanel(x, y) {
+    if (!panelHost) return;
+    const w = panelHost.offsetWidth || 40;
+    const h = panelHost.offsetHeight || 40;
+    const maxX = Math.max(0, window.innerWidth - w - 2);
+    const maxY = Math.max(0, window.innerHeight - h - 2);
+    const cx = Math.min(Math.max(0, x), maxX);
+    const cy = Math.min(Math.max(0, y), maxY);
+    panelHost.style.left = cx + "px";
+    panelHost.style.top = cy + "px";
+    panelHost.style.right = "auto";
+    panelHost.style.bottom = "auto";
+    return { x: cx, y: cy };
+  }
+
   function buildPanel() {
     if (panelHost || dead) return;
     if (!document.body) return;
     const host = document.createElement("div");
     host.id = PANEL_ID;
-    host.style.cssText = "all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483000;";
+    host.style.cssText = "all:initial;position:fixed;right:" + PANEL_MARGIN + "px;bottom:" +
+      PANEL_MARGIN + "px;z-index:2147483000;";
     const sh = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent =
-      ".p{display:flex;align-items:center;gap:8px;padding:7px 12px 7px 10px;border-radius:999px;" +
-      "background:rgba(23,28,35,.94);border:1px solid #2a323d;color:#e6eaf0;" +
+      ".p{display:flex;align-items:center;gap:8px;padding:5px;border-radius:999px;" +
+      "background:rgba(23,28,35,.9);border:1px solid #2a323d;color:#e6eaf0;" +
       "font:600 12px/1 system-ui,'Segoe UI',sans-serif;cursor:pointer;user-select:none;" +
-      "box-shadow:0 4px 14px rgba(0,0,0,.35);transition:border-color .15s ease}" +
-      ".p:hover{border-color:#3a4451}" +
-      ".dot{width:9px;height:9px;border-radius:50%;background:#6b7480;flex:none;transition:background .15s ease}" +
-      ".p.on .dot{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.22)}" +
-      ".p.dry .dot{background:#38bdf8;box-shadow:0 0 0 3px rgba(56,189,248,.22)}" +
-      ".p.bad{border-color:#ef4444}" +
-      ".cnt{color:#8b95a3;font-weight:500}" +
-      ".warn{color:#ef4444;font-weight:800}";
+      "box-shadow:0 3px 10px rgba(0,0,0,.3);opacity:.5;" +
+      "transition:opacity .15s ease,padding .15s ease,border-color .15s ease}" +
+      ".p:hover,.p.drag{opacity:1;padding:7px 12px 7px 8px;border-color:#3a4451}" +
+      ".tx,.cnt{display:none;white-space:nowrap}" +
+      ".p:hover .tx,.p:hover .cnt,.p.drag .tx{display:inline}" +
+      ".p.drag{cursor:grabbing}" +
+      ".dot{width:10px;height:10px;border-radius:50%;background:#6b7480;flex:none;transition:background .15s ease}" +
+      ".p.on .dot{background:#22c55e}" +
+      ".p.dry .dot{background:#38bdf8}" +
+      ".p.bad{border-color:#ef4444;opacity:.85}" +
+      ".p.bad .dot{background:#ef4444;animation:fctPulse 1.4s ease-in-out infinite}" +
+      "@keyframes fctPulse{0%,100%{opacity:1}50%{opacity:.35}}" +
+      ".cnt{color:#8b95a3;font-weight:500}";
     const box = document.createElement("div");
     box.className = "p";
-    box.title = "Клик — включить/выключить захват (Ctrl+Shift+Y)";
     const dot = document.createElement("span");
     dot.className = "dot";
     const st = document.createElement("span");
+    st.className = "tx";
     const cnt = document.createElement("span");
     cnt.className = "cnt";
     box.append(dot, st, cnt);
-    box.addEventListener("click", togglePanelCapture);
     sh.append(style, box);
     document.body.appendChild(host);
     panelHost = host;
     panelBox = box;
     panelState = st;
     panelCount = cnt;
+
+    const pos = savedPanelPos();
+    if (pos) placePanel(pos.x, pos.y);
+
+    // Перетаскивание и клик — на одной кнопке мыши, поэтому клик засчитываем
+    // только если курсор почти не сдвинулся: иначе перетаскивание каждый раз
+    // переключало бы захват.
+    let drag = null;
+    box.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const r = host.getBoundingClientRect();
+      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, sx: e.clientX, sy: e.clientY, moved: false };
+      try { box.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+    box.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      if (!drag.moved && Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) < 5) return;
+      if (!drag.moved) { drag.moved = true; box.classList.add("drag"); }
+      placePanel(e.clientX - drag.dx, e.clientY - drag.dy);
+    });
+    const endDrag = (e) => {
+      const d = drag;
+      drag = null;
+      box.classList.remove("drag");
+      try { box.releasePointerCapture(e.pointerId); } catch (err) {}
+      if (!d) return;
+      if (!d.moved) { togglePanelCapture(); return; }
+      const r = host.getBoundingClientRect();
+      try { localStorage.setItem(PANEL_POS_KEY, JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top) })); } catch (err) {}
+    };
+    box.addEventListener("pointerup", endDrag);
+    box.addEventListener("pointercancel", endDrag);
+
     updatePanel();
   }
+
+  window.addEventListener("resize", () => {
+    if (!panelHost) return;
+    const pos = savedPanelPos();
+    if (pos) placePanel(pos.x, pos.y);
+  });
 
   function updatePanel() {
     if (!panelBox) return;
@@ -1119,7 +1199,9 @@
     panelCount.textContent = todayCount ? "· " + todayCount + " за смену" : "";
     panelBox.title = dead
       ? "Расширение перезагрузилось — обновите страницу (F5)"
-      : (healthBad ? "Проверьте платформу: разметка могла измениться" : "Клик — включить/выключить захват (Ctrl+Shift+Y)");
+      : (healthBad
+        ? "Проверьте платформу: разметка могла измениться"
+        : "Клик — вкл/выкл захват (Ctrl+Shift+Y). Перетащите, если мешает");
   }
 
   function togglePanelCapture() {
