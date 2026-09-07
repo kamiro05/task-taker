@@ -1128,6 +1128,11 @@
       ".p.dry .dot{background:#38bdf8}" +
       ".p.bad{border-color:#ef4444;opacity:.85}" +
       ".p.bad .dot{background:#ef4444;animation:fctPulse 1.4s ease-in-out infinite}" +
+      // Остановленный движок разворачиваем всегда: это единственное состояние,
+      // которое требует действия пользователя, и наводить мышь ради него нельзя.
+      ".p.dead{opacity:1;padding:7px 12px 7px 8px;border-color:#f59e0b}" +
+      ".p.dead .tx{display:inline;color:#f59e0b}" +
+      ".p.dead .dot{background:#f59e0b}" +
       "@keyframes fctPulse{0%,100%{opacity:1}50%{opacity:.35}}" +
       ".cnt{color:#8b95a3;font-weight:500}";
     const box = document.createElement("div");
@@ -1195,7 +1200,8 @@
     panelBox.classList.toggle("on", on && !dry);
     panelBox.classList.toggle("dry", on && dry);
     panelBox.classList.toggle("bad", healthBad);
-    panelState.textContent = dead ? "ОСТАНОВЛЕН" : (on ? (dry ? "DRY RUN" : "ЗАХВАТ") : "ВЫКЛ");
+    panelBox.classList.toggle("dead", dead);
+    panelState.textContent = dead ? "ОСТАНОВЛЕН · F5" : (on ? (dry ? "DRY RUN" : "ЗАХВАТ") : "ВЫКЛ");
     panelCount.textContent = todayCount ? "· " + todayCount + " за смену" : "";
     panelBox.title = dead
       ? "Расширение перезагрузилось — обновите страницу (F5)"
@@ -1224,7 +1230,10 @@
     try { mo.disconnect(); } catch (e) {}
     try { clearInterval(orphanWatch); } catch (e) {}
     markState();
-    try { console.warn("[task taker] движок остановлен: " + reason); } catch (e) {}
+    // Именно console.info, а не warn: предупреждения из content script Chrome
+    // собирает в «Ошибки» на chrome://extensions, и штатная остановка выглядела
+    // там как поломка расширения. Пользователю об остановке говорит панель.
+    try { console.info("[task taker] движок остановлен: " + reason); } catch (e) {}
   }
 
   const orphanWatch = setInterval(() => {
