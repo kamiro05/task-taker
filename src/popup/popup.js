@@ -2,7 +2,7 @@
   const $ = (id) => document.getElementById(id);
   let cfg = null;
 
-  const toggleIds = ["dryRun", "activeTabOnly", "soundOnGrab", "logOnlyImportant"];
+  const toggleIds = ["dryRun", "activeTabOnly", "soundOnGrab", "showPanel", "logOnlyImportant"];
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   async function init() {
@@ -17,9 +17,22 @@
     renderPriorities();
     renderModeHint();
     await renderStats();
+    await renderHealth();
     await renderLog();
     await syncEnabledFromTab();
     renderStatus();
+  }
+
+  // Диагноз ставят вкладки; попап только показывает последний.
+  async function renderHealth() {
+    const data = await chrome.storage.local.get(FCT.STORAGE_KEYS.health);
+    const h = data[FCT.STORAGE_KEYS.health];
+    const bad = !!(h && h.ok === false);
+    $("healthBanner").hidden = !bad;
+    if (bad) {
+      $("healthText").textContent = (h.reason || "разметка платформы изменилась") +
+        " — захват может не работать. Нажмите «Проверить платформу».";
+    }
   }
 
   // Крупный статус, чтобы боевой режим нельзя было проглядеть: раньше его
@@ -313,10 +326,76 @@
     }
   });
 
+  // Проверяем ту вкладку платформы, которая открыта. Активная в приоритете:
+  // если их несколько, пользователь имеет в виду ту, на которую смотрит.
+  async function platformTab() {
+    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (active && (active.url || "").includes("alpha.flowconnect-group.com")) return active;
+    const tabs = await chrome.tabs.query({ url: "https://alpha.flowconnect-group.com/*" });
+    return tabs[0] || null;
+  }
+
+  function diagRow(cls, mark, label, detail) {
+    const li = document.createElement("li");
+    li.className = cls;
+    const m = document.createElement("span");
+    m.className = "mark";
+    m.textContent = mark;
+    const l = document.createElement("span");
+    l.className = "lbl";
+    l.textContent = label;
+    const d = document.createElement("span");
+    d.className = "det";
+    d.title = detail;
+    d.textContent = detail;
+    li.append(m, l, d);
+    return li;
+  }
+
+  function renderDiagnostics(res) {
+    const ul = $("diagList");
+    ul.textContent = "";
+    if (!res || !res.ok) {
+      ul.appendChild(diagRow("bad", "✕", "Нет связи", "движок не отвечает — перезагрузите страницу платформы (F5)"));
+      return;
+    }
+    for (const c of res.checks) {
+      if (c.ok === true) ul.appendChild(diagRow("ok", "✓", c.label, c.detail));
+      else if (c.ok === false) ul.appendChild(diagRow("bad", "✕", c.label, c.detail));
+      else ul.appendChild(diagRow("skip", "•", c.label, c.detail));
+    }
+    const bad = res.checks.filter(c => c.ok === false).length;
+    const li = document.createElement("li");
+    li.className = "summary";
+    li.textContent = bad
+      ? bad + " " + (bad === 1 ? "проверка не прошла" : "проверок не прошло") + " — правьте platform-config.js"
+      : "все проверки пройдены";
+    ul.appendChild(li);
+  }
+
+  $("diagBtn").addEventListener("click", async () => {
+    const ul = $("diagList");
+    ul.textContent = "";
+    ul.appendChild(diagRow("skip", "•", "Проверяю", "…"));
+    try {
+      const tab = await platformTab();
+      if (!tab) {
+        renderDiagnostics(null);
+        return;
+      }
+      const res = await chrome.tabs.sendMessage(tab.id, { type: "fct-diagnose" }).catch(() => null);
+      renderDiagnostics(res);
+      await renderHealth();
+    } catch (e) {
+      renderDiagnostics(null);
+    }
+  });
+
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes[FCT.STORAGE_KEYS.logs]) renderLog();
     if (changes[FCT.STORAGE_KEYS.stats]) renderStats();
+    if (changes[FCT.STORAGE_KEYS.health]) renderHealth();
   });
 
   init();

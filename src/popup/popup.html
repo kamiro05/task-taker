@@ -30,6 +30,11 @@
     </div>
   </section>
 
+  <div id="healthBanner" class="health-banner" hidden>
+    <span class="health-icon">!</span>
+    <span id="healthText"></span>
+  </div>
+
   <section class="toggles">
     <label class="row main-row">
       <span>Захват включён <small>(выключается при перезагрузке страницы)</small></span>
@@ -62,8 +67,21 @@
       <span>Звук при захвате</span>
       <input type="checkbox" id="soundOnGrab" class="switch">
     </label>
+    <label class="row">
+      <span>Панель на странице <small>(клик по ней = вкл/выкл)</small></span>
+      <input type="checkbox" id="showPanel" class="switch">
+    </label>
 
     <div id="modeHint" class="mode-hint"></div>
+  </section>
+
+  <section>
+    <h2>Проверка платформы</h2>
+    <p class="hint">Прогоняет все селекторы по открытой вкладке платформы.
+      Нужна, когда захват «молчит»: платформа меняет разметку без предупреждения,
+      и сломанный селектор внешне выглядит как «сегодня нет заявок».</p>
+    <button id="diagBtn" class="ghost wide">Проверить платформу</button>
+    <ul id="diagList" class="diaglist"></ul>
   </section>
 
   <section>

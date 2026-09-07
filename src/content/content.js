@@ -44,6 +44,7 @@
     try {
       document.documentElement.setAttribute("data-fct", dead ? "stopped" : (armed() ? "on" : "off"));
     } catch (e) {}
+    updatePanel();
   }
 
   const liveCfg = {
@@ -71,6 +72,15 @@
 
   function isVisibleEl(el) {
     return !!(el && el.isConnected && el.getClientRects().length > 0);
+  }
+
+  const normBtnText = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+  // Платформа дописывает к надписи суффикс («Start transaction (Platform
+  // ELD88)»), поэтому сравниваем по началу строки, а не на равенство.
+  function isConfirmLabel(t) {
+    const prefix = normBtnText((C.dialog && C.dialog.confirmPrefix) || "start transaction");
+    return !!t && t.indexOf(prefix) === 0;
   }
 
   function queryRows(root) {
@@ -428,7 +438,6 @@
     let confirmRe;
     try { confirmRe = new RegExp(d.confirmRe || "^\\s*(?:start\\s+transaction|save|create)\\s*$", "i"); } catch (e) { confirmRe = null; }
     const labels = Array.isArray(d.confirmLabels) ? d.confirmLabels : ["start transaction", "save", "create"];
-    const normBtnText = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
     const confirmPrefix = normBtnText(d.confirmPrefix || "start transaction");
     const presetText = String(d.presetText || "Last 8").trim().toLowerCase();
     const sel = d.containerSelector + ", mat-dialog-container";
@@ -467,9 +476,9 @@
       return tag === "button" || tag === "a" || el.getAttribute("role") === "button";
     };
 
-    // Платформа дописывает к надписи суффикс («Start transaction (Platform
-    // ELD88)»), поэтому сравниваем по началу строки, а не на равенство.
-    const isConfirmText = (t) => !!t && t.indexOf(confirmPrefix) === 0;
+    // Правило совпадения общее с самодиагностикой — иначе проверка и захват
+    // однажды разойдутся и «проверка прошла» перестанет что-либо значить.
+    const isConfirmText = isConfirmLabel;
 
     const drillDown = (el) => {
       let cur = el;
@@ -663,6 +672,7 @@
 
       if (!btn) {
         log({ event: "error", id: key, type: task.type, detail: "кнопка захвата не найдена" });
+        noteStructuralFailure("кнопка захвата не найдена в строке");
         return;
       }
 
@@ -716,6 +726,7 @@
         }
         abort.stop = true;
         log({ event: "grab", id: key, type: task.type, via: info.via, prio: info.prio, outcome });
+        noteGrabSuccess();
         onGrabbed(key);
         closeDialogAfterGrab();
         return;
@@ -729,6 +740,9 @@
           ? "платформа сообщила об ошибке"
           : "статус не изменился после клика" + (confirmDiag ? " (" + confirmDiag + ")" : "")
       });
+      // «Не нашёл кнопку/диалог» — это разметка. «Платформа сообщила об ошибке»
+      // или «задачу перехватили» — обычная гонка, тревогу поднимать не за что.
+      if (!hadError && /не найден/i.test(confirmDiag)) noteStructuralFailure(confirmDiag);
     } finally {
       grabInFlight.delete(key);
     }
@@ -847,8 +861,9 @@
   FCT.loadCfg().then(async cfg => {
     state.cfg = cfg;
     try {
-      const d = await chrome.storage.local.get(CAPTURE_KEY);
+      const d = await chrome.storage.local.get([CAPTURE_KEY, HEALTH_KEY]);
       captureOn = !!d[CAPTURE_KEY];
+      healthBad = !!(d[HEALTH_KEY] && d[HEALTH_KEY].ok === false);
     } catch (e) {}
     startObserver();
     if (document.readyState === "loading") {
@@ -878,13 +893,225 @@
 
   function onReady() {
     try {
-      const isTasksPage = /task/i.test(location.pathname) || !!document.querySelector("table.tasks-table");
-      if (isTasksPage) {
-        log({ event: "info", detail: "движок загружен на странице задач" });
-      }
+      if (isTasksPage()) log({ event: "info", detail: "движок загружен на странице задач" });
     } catch (e) {}
+    buildPanel();
+    refreshCount();
     reportTabState();
     scheduleRescan();
+    // Таблица подгружается асинхронно, поэтому проверяем не сразу. Если её нет
+    // и через 15 с — платформа сменила разметку, и захват уже не работает.
+    setTimeout(() => {
+      if (!/task/i.test(location.pathname)) return;
+      let table = null;
+      try { table = document.querySelector(C.dom.tableSelector); } catch (e) {}
+      if (!table) setHealth(false, "таблица заявок не найдена: " + C.dom.tableSelector);
+    }, 15000);
+  }
+
+  // ─────────────────────────── Самодиагностика ────────────────────────────
+  //
+  // Платформа дважды меняла разметку под нами, и оба раза захват ломался МОЛЧА:
+  // кнопка не находится — заявка просто не берётся, в журнале одна строчка
+  // среди сотни, бейдж зелёный. Узнавали об этом к концу смены.
+  //
+  // Отсюда два механизма: активная проверка (кнопка в попапе прогоняет все
+  // селекторы по живой странице) и пассивный сторож (считает подряд идущие
+  // СТРУКТУРНЫЕ отказы и поднимает красный бейдж). Структурный — это «не нашёл
+  // элемент», а не «заявку увёл другой оператор»: второе в порядке вещей.
+
+  const HEALTH_KEY = FCT.STORAGE_KEYS.health;
+  let healthBad = false;
+
+  function setHealth(ok, reason) {
+    healthBad = !ok;
+    updatePanel();
+    try {
+      chrome.storage.local.set({ [HEALTH_KEY]: { ok: !!ok, reason: reason || "", ts: Date.now() } });
+    } catch (e) {}
+  }
+
+  let structFails = 0;
+
+  // Один отказ — случайность (строка успела уехать из-под рук). Два подряд —
+  // разметка.
+  function noteStructuralFailure(reason) {
+    structFails += 1;
+    if (structFails >= 2) setHealth(false, reason);
+  }
+
+  function noteGrabSuccess() {
+    structFails = 0;
+    if (healthBad) setHealth(true, "");
+  }
+
+  function isTasksPage() {
+    try {
+      return /task/i.test(location.pathname) || !!document.querySelector(C.dom.tableSelector);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function check(label, ok, detail) {
+    return { label, ok, detail: detail || "" };
+  }
+
+  // ok === null — «не проверено», а не «сломано»: диалог виден только когда он
+  // открыт, и путать это с поломкой нельзя.
+  function runDiagnostics() {
+    const checks = [];
+    const onTasks = isTasksPage();
+
+    const table = (() => { try { return document.querySelector(C.dom.tableSelector); } catch (e) { return null; } })();
+    checks.push(check("Таблица заявок", onTasks ? !!table : null,
+      table ? C.dom.tableSelector : (onTasks ? "не найдена: " + C.dom.tableSelector : "откройте страницу задач")));
+
+    const bridge = document.documentElement.getAttribute("data-fct-bridge") === "1";
+    checks.push(check("Мост MAIN-мира", bridge,
+      bridge ? "ответы сервера видны" : "inject.js не внедрён — захваты будут считаться чужими"));
+
+    const rows = queryRows(document);
+    checks.push(check("Строки", onTasks ? rows.length > 0 : null,
+      rows.length ? rows.length + " шт." : (onTasks ? "ни одной: " + C.dom.rowSelector : "—")));
+
+    const row = rows[0];
+    if (row) {
+      const types = extractTypes(row);
+      checks.push(check("Типы задачи", types.length > 0,
+        types.length ? types.join(", ") : "пусто: " + C.dom.taskCellSelector));
+
+      const st = extractStatus(row);
+      checks.push(check("Статус", !!st, st || "пусто: " + C.dom.statusTextSelector));
+
+      let execCell = null;
+      try { execCell = row.querySelector(C.dom.executorSelector); } catch (e) {}
+      checks.push(check("Исполнитель", !!execCell,
+        execCell ? (cellText(row, C.dom.executorSelector) || "пусто (заявка свободна)") : "нет ячейки: " + C.dom.executorSelector));
+
+      const portal = portalOf(row);
+      checks.push(check("Портал", !!portal, portal || "пусто: " + C.dom.portalSelector));
+
+      const basis = [
+        cellText(row, C.dom.createDateSelector),
+        cellText(row, C.dom.companySelector),
+        cellText(row, C.dom.driverSelector)
+      ].filter(Boolean);
+      checks.push(check("Ключ заявки", basis.length === 3,
+        basis.length === 3 ? "дата + компания + водитель" : "собран из " + basis.length + "/3 полей — возможны ложные дубли"));
+
+      const btn = findTakeButton(row);
+      checks.push(check("Кнопка захвата", !!btn,
+        btn ? (btn.className || btn.tagName.toLowerCase()) : "не найдена: " + C.takeButton.transactionCellSelector));
+    }
+
+    // Диалог проверяем, только если он сейчас открыт: именно его надписи
+    // платформа переименовывала.
+    const dlg = findOpenDialog();
+    if (!dlg) {
+      checks.push(check("Диалог транзакции", null, "не открыт — откройте окно Create transaction и проверьте снова"));
+    } else {
+      const d = C.dialog || {};
+      const wantCancel = normBtnText(d.cancelText || "cancel");
+      let nodes = [];
+      try { nodes = [...dlg.querySelectorAll("button, [role='button'], a, div, span")]; } catch (e) {}
+      const visible = nodes.filter(isVisibleEl);
+      const confirmEl = visible.find(el => isConfirmLabel(normBtnText(el.textContent)));
+      const cancelEl = visible.find(el => normBtnText(el.textContent) === wantCancel);
+      checks.push(check("Кнопка подтверждения", !!confirmEl,
+        confirmEl ? "«" + normBtnText(confirmEl.textContent) + "»" : "нет надписи, начинающейся с «" + normBtnText(d.confirmPrefix) + "»"));
+      checks.push(check("Кнопка отмены", !!cancelEl,
+        cancelEl ? "«" + wantCancel + "»" : "не найдена — окно нечем закрыть"));
+    }
+
+    const failed = checks.filter(c => c.ok === false);
+    if (onTasks) setHealth(failed.length === 0, failed.length ? failed[0].label + ": " + failed[0].detail : "");
+    return { url: location.href, onTasks, checks };
+  }
+
+  // ───────────────────────── Панель на странице ────────────────────────────
+  //
+  // Чтобы узнать состояние захвата, приходилось открывать попап — и именно на
+  // этом ловились все прошлые сюрпризы со слайдером. Панель держит состояние
+  // перед глазами и переключает захват одним кликом.
+  //
+  // Живёт в shadow DOM: стили Angular Material до неё не дотягиваются, а её
+  // собственные мутации не всплывают в MutationObserver движка.
+
+  const PANEL_ID = "__fct_panel";
+  let panelHost = null;
+  let panelBox = null;
+  let panelState = null;
+  let panelCount = null;
+  let todayCount = 0;
+
+  function destroyPanel() {
+    if (!panelHost) return;
+    try { panelHost.remove(); } catch (e) {}
+    panelHost = panelBox = panelState = panelCount = null;
+  }
+
+  function buildPanel() {
+    if (panelHost || state.cfg.showPanel === false || dead) return;
+    if (!document.body) return;
+    const host = document.createElement("div");
+    host.id = PANEL_ID;
+    host.style.cssText = "all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483000;";
+    const sh = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent =
+      ".p{display:flex;align-items:center;gap:8px;padding:7px 12px 7px 10px;border-radius:999px;" +
+      "background:rgba(23,28,35,.94);border:1px solid #2a323d;color:#e6eaf0;" +
+      "font:600 12px/1 system-ui,'Segoe UI',sans-serif;cursor:pointer;user-select:none;" +
+      "box-shadow:0 4px 14px rgba(0,0,0,.35);transition:border-color .15s ease}" +
+      ".p:hover{border-color:#3a4451}" +
+      ".dot{width:9px;height:9px;border-radius:50%;background:#6b7480;flex:none;transition:background .15s ease}" +
+      ".p.on .dot{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.22)}" +
+      ".p.dry .dot{background:#38bdf8;box-shadow:0 0 0 3px rgba(56,189,248,.22)}" +
+      ".p.bad{border-color:#ef4444}" +
+      ".cnt{color:#8b95a3;font-weight:500}" +
+      ".warn{color:#ef4444;font-weight:800}";
+    const box = document.createElement("div");
+    box.className = "p";
+    box.title = "Клик — включить/выключить захват (Ctrl+Shift+Y)";
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    const st = document.createElement("span");
+    const cnt = document.createElement("span");
+    cnt.className = "cnt";
+    box.append(dot, st, cnt);
+    box.addEventListener("click", togglePanelCapture);
+    sh.append(style, box);
+    document.body.appendChild(host);
+    panelHost = host;
+    panelBox = box;
+    panelState = st;
+    panelCount = cnt;
+    updatePanel();
+  }
+
+  function updatePanel() {
+    if (!panelBox) return;
+    const on = armed();
+    const dry = !!state.cfg.dryRun;
+    panelBox.classList.toggle("on", on && !dry);
+    panelBox.classList.toggle("dry", on && dry);
+    panelBox.classList.toggle("bad", healthBad);
+    panelState.textContent = dead ? "ОСТАНОВЛЕН" : (on ? (dry ? "DRY RUN" : "ЗАХВАТ") : "ВЫКЛ");
+    panelCount.textContent = todayCount ? "· " + todayCount + " за смену" : "";
+    panelBox.title = dead
+      ? "Расширение перезагрузилось — обновите страницу (F5)"
+      : (healthBad ? "Проверьте платформу: разметка могла измениться" : "Клик — включить/выключить захват (Ctrl+Shift+Y)");
+  }
+
+  function togglePanelCapture() {
+    if (dead) { location.reload(); return; }
+    const next = !armed();
+    try { chrome.runtime.sendMessage({ type: "fct-set-enabled-all", value: next }).catch(() => {}); } catch (e) {}
+  }
+
+  function refreshCount() {
+    FCT.loadStats().then(s => { todayCount = s.total || 0; updatePanel(); }).catch(() => {});
   }
 
   // Полная остановка движка. Нужна для осиротевшей вкладки: управлять ею уже
@@ -895,6 +1122,7 @@
     liveEnabled = false;
     captureOn = false;
     try { mo.disconnect(); } catch (e) {}
+    try { clearInterval(orphanWatch); } catch (e) {}
     markState();
     try { console.warn("[task taker] движок остановлен: " + reason); } catch (e) {}
   }
@@ -916,10 +1144,18 @@
         if (!next) log({ event: "info", detail: "захват выключен (глобальный стоп)" });
       }
     }
+    if (changes[HEALTH_KEY]) {
+      const v = changes[HEALTH_KEY].newValue;
+      healthBad = !!(v && v.ok === false);
+      updatePanel();
+    }
+    if (changes[FCT.STORAGE_KEYS.stats]) refreshCount();
     if (!changes[FCT.STORAGE_KEYS.cfg]) return;
     const next = Object.assign({}, FCT.DEFAULT_CFG, changes[FCT.STORAGE_KEYS.cfg].newValue);
     if (!next.portals || typeof next.portals !== "object") next.portals = { eld88: true, flow: true };
     state.cfg = next;
+    if (next.showPanel === false) destroyPanel(); else buildPanel();
+    updatePanel();
   });
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -937,6 +1173,8 @@
       try {
         sendResponse({ ok: true, enabled: liveEnabled, armed: armed(), dryRun: !!state.cfg.dryRun });
       } catch (e) {}
+    } else if (msg.type === "fct-diagnose") {
+      try { sendResponse(Object.assign({ ok: true }, runDiagnostics())); } catch (e) {}
     }
   });
 

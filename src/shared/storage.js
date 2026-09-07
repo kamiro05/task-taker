@@ -6,7 +6,10 @@ FCT.STORAGE_KEYS = {
   stats: "stats",
   // Глобальный стоп-кран захвата. Пишет его service worker, читают все вкладки:
   // storage.onChanged доходит туда, куда может не дойти sendMessage.
-  capture: "captureOn"
+  capture: "captureOn",
+  // Диагноз движка: { ok, reason, ts }. Плохой диагноз поднимает красный
+  // бейдж — иначе поломка селекторов остаётся незамеченной до конца смены.
+  health: "health"
 };
 
 FCT.SEED_VERSION = 2;
@@ -24,6 +27,7 @@ FCT.DEFAULT_CFG = {
   unknownPolicy: "skip",
   activeTabOnly: false,
   soundOnGrab: true,
+  showPanel: true,
   logOnlyImportant: false,
   humanDelayMinMs: 0,
   humanDelayMaxMs: 40,

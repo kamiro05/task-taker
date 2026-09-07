@@ -1,9 +1,12 @@
 const BADGE_COLOR = "#16a34a";
 const BADGE_COLOR_OFF = "#9ca3af";
 
+const BADGE_COLOR_BAD = "#ef4444";
+
 const TABS_URL = "https://alpha.flowconnect-group.com/*";
 const SESSION_KEY = "enabledTabs";
 const CAPTURE_KEY = "captureOn";
+const HEALTH_KEY = "health";
 
 // Источник правды о захвате — сами вкладки: liveEnabled живёт в content script
 // и умирает вместе со страницей при перезагрузке.
@@ -15,6 +18,7 @@ const CAPTURE_KEY = "captureOn";
 let enabledTabs = new Set();
 let restored = false;
 let grabCount = 0;
+let healthBad = false;
 
 async function restoreTabs() {
   if (restored) return;
@@ -40,6 +44,13 @@ async function persistTabs() {
 function paintBadge() {
   const on = enabledTabs.size > 0;
   if (!on) grabCount = 0;
+  // Поломка селекторов важнее счётчика: без красного «!» она незаметна, пока
+  // не кончится смена. При выключенном захвате не тревожим — чинить нечего.
+  if (on && healthBad) {
+    chrome.action.setBadgeText({ text: "!" });
+    chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR_BAD });
+    return;
+  }
   chrome.action.setBadgeText({ text: on ? (grabCount > 0 ? String(grabCount) : "ON") : "" });
   chrome.action.setBadgeBackgroundColor({ color: on ? BADGE_COLOR : BADGE_COLOR_OFF });
 }
@@ -58,6 +69,12 @@ async function setTabEnabled(tabId, on) {
 // на вид слайдере. Воркер так не умирает.
 async function broadcastEnabled(value) {
   await restoreTabs();
+  // Включение снимает прошлую тревогу: иначе диагноз, поставленный вчера,
+  // светит красным вечно. Если поломка на месте, сторож поднимет её снова.
+  if (value && healthBad) {
+    healthBad = false;
+    try { await chrome.storage.local.set({ [HEALTH_KEY]: { ok: true, reason: "", ts: Date.now() } }); } catch (e) {}
+  }
   let tabs = [];
   try { tabs = await chrome.tabs.query({ url: TABS_URL }); } catch (e) {}
   await Promise.all(tabs.map(async (t) => {
@@ -87,9 +104,32 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === "loading") setTabEnabled(tabId, false);
 });
 
+// Диагноз ставят вкладки (они видят разметку), а рисует его бейджем воркер.
+// storage.onChanged будит воркер сам, отдельного сообщения не нужно.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[HEALTH_KEY]) return;
+  const v = changes[HEALTH_KEY].newValue;
+  healthBad = !!(v && v.ok === false);
+  restoreTabs().then(paintBadge);
+});
+
+// Ctrl+Shift+Y: выключить захват, не открывая попап. Клавишу можно сменить в
+// chrome://extensions/shortcuts.
+chrome.commands.onCommand.addListener((cmd) => {
+  if (cmd !== "toggle-capture") return;
+  restoreTabs().then(() => broadcastEnabled(enabledTabs.size === 0));
+});
+
 // Воркер мог только что проснуться, а мог стартовать после перезагрузки
 // расширения (тогда набор пуст, и стоп-кран обязан встать в «выкл»).
-restoreTabs().then(() => { persistTabs(); paintBadge(); });
+restoreTabs()
+  .then(async () => {
+    try {
+      const d = await chrome.storage.local.get(HEALTH_KEY);
+      healthBad = !!(d[HEALTH_KEY] && d[HEALTH_KEY].ok === false);
+    } catch (e) {}
+  })
+  .then(() => { persistTabs(); paintBadge(); });
 
 async function trustedClick(tabId, x, y) {
   const target = { tabId };

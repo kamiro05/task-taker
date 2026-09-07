@@ -11,6 +11,15 @@
   // Раньше здесь же собирался payload turbo-захвата и реестр задач из
   // TasksHistory/SSE — всё это удалено вместе с turbo-режимом.
 
+  // Отметка присутствия для самодиагностики. Без этого скрипта захват внешне
+  // работает, но каждый успех выглядит как чужой: подтверждения от сервера
+  // никто не видит. Изолированный мир проверить это может только через DOM.
+  function markBridge() {
+    try { document.documentElement.setAttribute("data-fct-bridge", "1"); } catch (e) {}
+  }
+  if (document.documentElement) markBridge();
+  else document.addEventListener("DOMContentLoaded", markBridge, { once: true });
+
   function postInsertObserved(status) {
     try {
       window.postMessage({

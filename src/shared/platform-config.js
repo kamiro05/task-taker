@@ -36,6 +36,10 @@ FCT.CONFIG = {
   rescanDebounceMs: 150,
 
   dom: {
+    // Сама таблица. Отдельно от rowSelector: пустая таблица — норма, а вот
+    // исчезнувшая таблица на странице задач означает, что платформа сменила
+    // разметку и захват молча перестал работать.
+    tableSelector: "table.tasks-table",
     rowSelector: "table.tasks-table tbody tr.mat-mdc-row",
     taskCellSelector: ".mat-column-Task [data-tasks]",
     typeChipSelector: ".mat-column-Task .task-chip",
