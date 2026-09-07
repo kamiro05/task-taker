@@ -67,7 +67,7 @@ Task Taker помогает диспетчеру не упускать новы�
 Свой снимок (Win+Shift+S) под этот холст подгоняет скрипт:
 
 ```
-powershell -ExecutionPolicy Bypass -File toolsit-screenshot.ps1 снимок.png
+powershell -ExecutionPolicy Bypass -File tools/fit-screenshot.ps1 снимок.png
 ```
 
 Он кладёт снимок по центру холста нужного размера и уменьшает только если тот
