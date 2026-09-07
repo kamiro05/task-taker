@@ -3,14 +3,51 @@
   window.__fctContentInstalled = true;
 
   const C = FCT.CONFIG;
+  const CAPTURE_KEY = FCT.STORAGE_KEYS.capture;
   const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   const state = { cfg: Object.assign({}, FCT.DEFAULT_CFG) };
 
+  // Включение конкретной вкладки: приходит сообщением и обнуляется вместе со
+  // страницей, чтобы захват не оживал сам после перезагрузки.
   let liveEnabled = false;
 
+  // Глобальный стоп-кран, продублированный в chrome.storage.local. Сообщение
+  // «выключить» может не дойти до вкладки (воркер спал, вкладка в фоне, гонка
+  // при закрытии попапа), а событие storage.onChanged приходит во ВСЕ живые
+  // контексты расширения и обмена сообщениями не требует.
+  let captureOn = false;
+
+  // Контекст расширения умирает при его перезагрузке/обновлении, но скрипт,
+  // уже внедрённый в открытую вкладку, продолжает жить: его MutationObserver
+  // работает, liveEnabled остаётся true, а сообщения до него больше не доходят
+  // — ни включить, ни выключить. Именно такой «осиротевший» движок и брал
+  // заявки при выключенном слайдере, причём молча: запись в журнал у него тоже
+  // падает. Признак смерти контекста — пропавший chrome.runtime.id.
+  function contextAlive() {
+    try { return !!(chrome && chrome.runtime && chrome.runtime.id); } catch (e) { return false; }
+  }
+
+  // Движок остановлен навсегда (см. shutdown()).
+  let dead = false;
+
+  // Единственное условие захвата. Проверяется перед каждым шагом, а не один раз
+  // на входе: между постановкой в очередь и кликом проходят сотни миллисекунд.
+  function armed() {
+    return liveEnabled && captureOn && contextAlive();
+  }
+
+  // Состояние движка видно в DOM: `<html data-fct="on|off|stopped">`. Скрипт
+  // работает в изолированном мире, поэтому иначе снаружи (в консоли страницы,
+  // в тестах) не проверить, жив ли захват в этой вкладке.
+  function markState() {
+    try {
+      document.documentElement.setAttribute("data-fct", dead ? "stopped" : (armed() ? "on" : "off"));
+    } catch (e) {}
+  }
+
   const liveCfg = {
-    get enabled() { return liveEnabled; },
+    get enabled() { return armed(); },
     get priorities() { return state.cfg.priorities; },
     get unknownPolicy() { return state.cfg.unknownPolicy; }
   };
@@ -192,7 +229,7 @@
   async function waitForTaken(row, taskId) {
     const deadline = Date.now() + C.confirmTimeoutMs;
     while (Date.now() < deadline) {
-      if (!liveEnabled) return "";
+      if (!armed()) return "";
       if (!row.isConnected) return "row-gone";
       const exec = cellText(row, C.dom.executorSelector);
       if (exec) return "taken";
@@ -382,8 +419,8 @@
   async function autoConfirmTxnDialog(abort) {
     // Выключение слайдера обязано останавливать и уже начатое подтверждение:
     // раньше цикл дожимал диалог после «выкл» и заявка всё-таки бралась.
-    // Ручной вызов __fctConfirm() без abort от liveEnabled не зависит.
-    const stopped = () => abort ? (!!abort.stop || !liveEnabled) : false;
+    // Ручной вызов __fctConfirm() без abort от состояния захвата не зависит.
+    const stopped = () => abort ? (!!abort.stop || !armed()) : false;
     const d = C.dialog || {};
     if (!d.containerSelector) return "диалог не найден";
     let titleRe;
@@ -583,7 +620,7 @@
     const key = String(task.id);
     if (grabInFlight.has(key)) return;
     // Захват мог быть выключен, пока задача ждала в очереди.
-    if (!liveEnabled) return;
+    if (!armed()) return;
     grabInFlight.add(key);
     try {
       if (state.cfg.dryRun) {
@@ -605,7 +642,7 @@
       if (delay > 0) await sleepV(delay);
 
       // Пауза «под человека» — самый вероятный момент для выключения слайдера.
-      if (!liveEnabled) {
+      if (!armed()) {
         log({ event: "skip", id: key, type: task.type, detail: "захват выключен" });
         return;
       }
@@ -629,6 +666,9 @@
         return;
       }
 
+      // Последняя проверка перед необратимым действием.
+      if (!armed()) return;
+
       const clickedAt = Date.now();
       dispatchClick(btn);
 
@@ -645,7 +685,7 @@
       }
       // Слайдер выключили посреди подтверждения: бросаем диалог, а не дожидаемся
       // таймаутов, которые всё равно кончатся записью «ошибка».
-      if (!outcome && !liveEnabled) {
+      if (!outcome && !armed()) {
         abort.stop = true;
         closeOpenDialog();
         log({ event: "skip", id: key, type: task.type, detail: "захват выключен во время подтверждения" });
@@ -804,8 +844,12 @@
     }
   });
 
-  FCT.loadCfg().then(cfg => {
+  FCT.loadCfg().then(async cfg => {
     state.cfg = cfg;
+    try {
+      const d = await chrome.storage.local.get(CAPTURE_KEY);
+      captureOn = !!d[CAPTURE_KEY];
+    } catch (e) {}
     startObserver();
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", onReady);
@@ -828,6 +872,7 @@
   // со страницей. Сообщаем своё состояние сами: при загрузке (выключено) и при
   // каждом переключении — иначе бейдж застревает на ON у выключённого захвата.
   function reportTabState() {
+    markState();
     try { chrome.runtime.sendMessage({ type: "fct-tab-state", enabled: liveEnabled }).catch(() => {}); } catch (e) {}
   }
 
@@ -842,8 +887,36 @@
     scheduleRescan();
   }
 
+  // Полная остановка движка. Нужна для осиротевшей вкладки: управлять ею уже
+  // нечем, поэтому она обязана замолчать сама.
+  function shutdown(reason) {
+    if (dead) return;
+    dead = true;
+    liveEnabled = false;
+    captureOn = false;
+    try { mo.disconnect(); } catch (e) {}
+    markState();
+    try { console.warn("[task taker] движок остановлен: " + reason); } catch (e) {}
+  }
+
+  const orphanWatch = setInterval(() => {
+    if (contextAlive()) { markState(); return; }
+    clearInterval(orphanWatch);
+    shutdown("расширение перезагружено или обновлено — перезагрузите страницу платформы");
+  }, 2000);
+
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !changes[FCT.STORAGE_KEYS.cfg]) return;
+    if (area !== "local") return;
+    // Стоп-кран приходит сюда даже тогда, когда сообщение до вкладки не дошло.
+    if (changes[CAPTURE_KEY]) {
+      const next = !!changes[CAPTURE_KEY].newValue;
+      if (captureOn !== next) {
+        captureOn = next;
+        markState();
+        if (!next) log({ event: "info", detail: "захват выключен (глобальный стоп)" });
+      }
+    }
+    if (!changes[FCT.STORAGE_KEYS.cfg]) return;
     const next = Object.assign({}, FCT.DEFAULT_CFG, changes[FCT.STORAGE_KEYS.cfg].newValue);
     if (!next.portals || typeof next.portals !== "object") next.portals = { eld88: true, flow: true };
     state.cfg = next;
@@ -853,12 +926,16 @@
     if (!msg || typeof msg !== "object") return;
     if (msg.type === "fct-set-enabled") {
       liveEnabled = !!msg.value;
+      // Сообщение авторитетнее для этой вкладки: иначе между ним и событием
+      // storage.onChanged оставалось окно, в котором захват уже включён по
+      // слайдеру, но ещё выключен по стоп-крану.
+      if (liveEnabled) captureOn = true;
       reportTabState();
       log({ event: "info", detail: liveEnabled ? "захват ВКЛЮЧЁН" : "захват выключен" });
       try { sendResponse({ ok: true, enabled: liveEnabled }); } catch (e) {}
     } else if (msg.type === "fct-get-state") {
       try {
-        sendResponse({ ok: true, enabled: liveEnabled, dryRun: !!state.cfg.dryRun });
+        sendResponse({ ok: true, enabled: liveEnabled, armed: armed(), dryRun: !!state.cfg.dryRun });
       } catch (e) {}
     }
   });

@@ -3,6 +3,7 @@ const BADGE_COLOR_OFF = "#9ca3af";
 
 const TABS_URL = "https://alpha.flowconnect-group.com/*";
 const SESSION_KEY = "enabledTabs";
+const CAPTURE_KEY = "captureOn";
 
 // Источник правды о захвате — сами вкладки: liveEnabled живёт в content script
 // и умирает вместе со страницей при перезагрузке.
@@ -28,8 +29,12 @@ async function restoreTabs() {
   } catch (e) {}
 }
 
+// Кроме набора вкладок пишем ОДИН общий флаг в storage.local. Это стоп-кран:
+// storage.onChanged доходит до каждой живой вкладки сам, без sendMessage,
+// который может не дойти (вкладка в фоне, гонка при закрытии попапа).
 async function persistTabs() {
   try { await chrome.storage.session.set({ [SESSION_KEY]: [...enabledTabs] }); } catch (e) {}
+  try { await chrome.storage.local.set({ [CAPTURE_KEY]: enabledTabs.size > 0 }); } catch (e) {}
 }
 
 function paintBadge() {
@@ -82,8 +87,9 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === "loading") setTabEnabled(tabId, false);
 });
 
-// Воркер мог только что проснуться — восстанавливаем бейдж.
-restoreTabs().then(paintBadge);
+// Воркер мог только что проснуться, а мог стартовать после перезагрузки
+// расширения (тогда набор пуст, и стоп-кран обязан встать в «выкл»).
+restoreTabs().then(() => { persistTabs(); paintBadge(); });
 
 async function trustedClick(tabId, x, y) {
   const target = { tabId };

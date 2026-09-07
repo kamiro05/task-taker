@@ -3,7 +3,10 @@ globalThis.FCT = globalThis.FCT || {};
 FCT.STORAGE_KEYS = {
   cfg: "cfg",
   logs: "logs",
-  stats: "stats"
+  stats: "stats",
+  // Глобальный стоп-кран захвата. Пишет его service worker, читают все вкладки:
+  // storage.onChanged доходит туда, куда может не дойти sendMessage.
+  capture: "captureOn"
 };
 
 FCT.SEED_VERSION = 2;
