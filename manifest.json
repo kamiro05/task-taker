@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FlowConnect Task Taker",
-  "version": "0.9.4",
+  "version": "1.0.0",
   "description": "Мгновенный захват новых заявок на alpha.flowconnect-group.com с приоритетами по типу задачи.",
   "minimum_chrome_version": "111",
   "icons": {
@@ -10,11 +10,8 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["storage", "scripting", "debugger"],
-  "host_permissions": [
-    "https://alpha.flowconnect-group.com/*",
-    "https://api.flowconnect-group.com/*"
-  ],
+  "permissions": ["storage", "scripting"],
+  "host_permissions": ["https://alpha.flowconnect-group.com/*"],
   "background": {
     "service_worker": "src/background/service-worker.js"
   },

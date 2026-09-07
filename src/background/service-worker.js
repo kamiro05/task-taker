@@ -134,25 +134,6 @@ restoreTabs()
   })
   .then(() => { persistTabs(); paintBadge(); });
 
-async function trustedClick(tabId, x, y) {
-  const target = { tabId };
-  try {
-    await chrome.debugger.attach(target, "1.3");
-  } catch (e) {
-    return { ok: false, error: "attach: " + ((e && e.message) || e) };
-  }
-  try {
-    const base = { x: Math.round(x), y: Math.round(y), button: "left", clickCount: 1 };
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", Object.assign({ type: "mouseMoved" }, base));
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", Object.assign({ type: "mousePressed" }, base));
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", Object.assign({ type: "mouseReleased" }, base));
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: "dispatch: " + ((e && e.message) || e) };
-  } finally {
-    try { await chrome.debugger.detach(target); } catch (e) {}
-  }
-}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg.type !== "string") return;
@@ -167,15 +148,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.type === "fct-grab-ok") {
     grabCount += 1;
     restoreTabs().then(paintBadge);
-  } else if (msg.type === "fct-trusted-click") {
-    const tabId = sender && sender.tab && sender.tab.id;
-    if (!tabId) {
-      try { sendResponse({ ok: false, error: "нет tabId" }); } catch (e) {}
-      return;
-    }
-    trustedClick(tabId, Number(msg.x) || 0, Number(msg.y) || 0).then((r) => {
-      try { sendResponse(r); } catch (e) {}
-    });
-    return true;
   }
 });

@@ -405,24 +405,6 @@
     return out;
   }
 
-  async function trustedClickAt(el) {
-    let r = null;
-    try { r = el.getBoundingClientRect(); } catch (e) {}
-    if (!r || r.width <= 0 || r.height <= 0) return { ok: false, error: "нет координат" };
-    const x = Math.round(r.left + r.width / 2);
-    const y = Math.round(r.top + r.height / 2);
-    return await new Promise((resolve) => {
-      let settled = false;
-      const fin = (v) => { if (!settled) { settled = true; resolve(v); } };
-      try {
-        chrome.runtime.sendMessage({ type: "fct-trusted-click", x, y }, (res) => {
-          fin(res && res.ok ? { ok: true } : { ok: false, error: (res && res.error) || "нет ответа SW" });
-        });
-      } catch (e) { fin({ ok: false, error: "SW: " + ((e && e.message) || e) }); }
-      setTimeout(() => fin({ ok: false, error: "таймаут SW" }), 3000);
-    });
-  }
-
   // abort — общий с вызывающим кодом флаг. Без него подтверждение продолжает
   // жить своей жизнью после того, как захват уже признан чужим: наблюдали два
   // лишних клика и два HTTP 400 по заявке, которую забрал другой оператор.
@@ -446,7 +428,7 @@
     const reclickAfterMs = d.reclickAfterMs || 2500;
     const submitWaitMs = d.submitWaitMs || 20000;
     const presetDone = new WeakSet();
-    const dg = { seen: false, preset: "—", clicks: 0, trusted: false, loading: false };
+    const dg = { seen: false, preset: "—", clicks: 0, loading: false };
     let inventoryLogged = false;
     let foundIters = 0;
     let activeTxSeen = false;
@@ -600,21 +582,19 @@
         }
 
         if (dg.clicks < maxClicks && now - lastClickAt >= reclickAfterMs && now < deadline) {
-          const tr = await trustedClickAt(cb);
+          // Повторный клик — обычный. Раньше здесь шёл «доверенный» клик через
+          // chrome.debugger, но он требовал самого чувствительного разрешения
+          // в магазине и вешал полосу «расширение начало отладку браузера»,
+          // а срабатывал только как вторая попытка после обычного клика.
+          dispatchClick(cb);
           dg.clicks++;
           lastClickAt = Date.now();
-          if (tr.ok) {
-            dg.trusted = true;
-            log({ event: "info", detail: "диалог: доверенный клик (debugger) №" + dg.clicks });
-          } else {
-            dispatchClick(cb);
-            log({ event: "info", detail: "диалог: повторный клик №" + dg.clicks + " (" + tr.error + ")" });
-          }
+          log({ event: "info", detail: "диалог: повторный клик №" + dg.clicks });
           continue;
         }
 
         if (now >= deadline) {
-          return "кликов " + dg.clicks + (dg.trusted ? " (вкл. доверенный)" : "") + ", «" + btnText + "» не отреагировала (loading не наступил)";
+          return "кликов " + dg.clicks + ", «" + btnText + "» не отреагировала (loading не наступил)";
         }
       }
     }
