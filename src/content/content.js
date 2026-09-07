@@ -821,6 +821,9 @@
     if (rescanTimer) return;
     rescanTimer = setTimeout(() => {
       rescanTimer = null;
+      // Здесь же ловим появление/исчезновение таблицы при SPA-переходе, чтобы
+      // панель не ждала до секунды тика сторожа.
+      syncPanel();
       for (const row of queryRows(document)) ingestFromDom(row);
     }, C.rescanDebounceMs);
   }
@@ -895,7 +898,7 @@
     try {
       if (isTasksPage()) log({ event: "info", detail: "движок загружен на странице задач" });
     } catch (e) {}
-    buildPanel();
+    syncPanel();
     refreshCount();
     reportTabState();
     scheduleRescan();
@@ -1051,8 +1054,23 @@
     panelHost = panelBox = panelState = panelCount = null;
   }
 
+  // Панель нужна только там, где есть таблица заявок: на остальных страницах
+  // платформы (логин, компании, отчёты) захватывать нечего, и она только мешает.
+  // Проверяем именно таблицу, а не URL: платформа — SPA, маршрут меняется без
+  // перезагрузки, а таблица либо есть в DOM, либо нет.
+  function panelShouldShow() {
+    if (state.cfg.showPanel === false) return false;
+    try { return !!document.querySelector(C.dom.tableSelector); } catch (e) { return false; }
+  }
+
+  // Вызывается по таймеру: на SPA-переходах никаких событий загрузки нет.
+  function syncPanel() {
+    if (panelShouldShow()) buildPanel();
+    else destroyPanel();
+  }
+
   function buildPanel() {
-    if (panelHost || state.cfg.showPanel === false || dead) return;
+    if (panelHost || dead) return;
     if (!document.body) return;
     const host = document.createElement("div");
     host.id = PANEL_ID;
@@ -1128,7 +1146,7 @@
   }
 
   const orphanWatch = setInterval(() => {
-    if (contextAlive()) { markState(); return; }
+    if (contextAlive()) { syncPanel(); markState(); return; }
     clearInterval(orphanWatch);
     shutdown("расширение перезагружено или обновлено — перезагрузите страницу платформы");
   }, 2000);
@@ -1154,7 +1172,7 @@
     const next = Object.assign({}, FCT.DEFAULT_CFG, changes[FCT.STORAGE_KEYS.cfg].newValue);
     if (!next.portals || typeof next.portals !== "object") next.portals = { eld88: true, flow: true };
     state.cfg = next;
-    if (next.showPanel === false) destroyPanel(); else buildPanel();
+    syncPanel();
     updatePanel();
   });
 
