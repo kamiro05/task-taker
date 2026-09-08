@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+  <title>Task Taker I</title>
+</head>
+<body>
+  <header class="head">
+    <div class="brand">
+      <span class="logo">⚡</span>
+      <div>
+        <div class="title">Task Taker I</div>
+      </div>
+    </div>
+    <button id="reinjectBtn" class="ghost wide">Подключить движок к этой вкладке</button>
+    <div id="reinjectStatus" class="reinject-status"></div>
+  </header>
+
+  <section id="statusCard" class="status-card">
+    <div class="status-main">
+      <span id="statusBadge" class="status-badge">—</span>
+      <span id="statusHint" class="status-hint"></span>
+    </div>
+    <div class="stats-row">
+      <div class="stat"><span id="statTotal" class="stat-v">0</span><span class="stat-k">за сегодня</span></div>
+      <div class="stat"><span id="statAvg" class="stat-v">—</span><span class="stat-k">среднее</span></div>
+      <div class="stat"><span id="statLast" class="stat-v">—</span><span class="stat-k">последний</span></div>
+    </div>
+  </section>
+
+  <div id="healthBanner" class="health-banner" hidden>
+    <span class="health-icon">!</span>
+    <span id="healthText"></span>
+  </div>
+
+  <section class="toggles">
+    <label class="row main-row">
+      <span title="Сбрасывается при перезагрузке страницы">Захват включён</span>
+      <input type="checkbox" id="enabled" class="switch">
+    </label>
+
+    <div class="row">
+      <span>Порталы</span>
+      <div class="chip-toggles">
+        <label class="chip-toggle">
+          <input type="checkbox" id="portalEld88">
+          <span>ELD88</span>
+        </label>
+        <label class="chip-toggle">
+          <input type="checkbox" id="portalFlow">
+          <span>FLOW</span>
+        </label>
+      </div>
+    </div>
+
+    <label class="row">
+      <span title="Заявки не берутся: только записи в журнале">Dry Run</span>
+      <input type="checkbox" id="dryRun" class="switch">
+    </label>
+    <label class="row">
+      <span>Только в активной вкладке</span>
+      <input type="checkbox" id="activeTabOnly" class="switch">
+    </label>
+    <label class="row">
+      <span>Звук при захвате</span>
+      <input type="checkbox" id="soundOnGrab" class="switch">
+    </label>
+    <label class="row">
+      <span>Панель на странице</span>
+      <input type="checkbox" id="showPanel" class="switch">
+    </label>
+    <div class="row">
+      <span>Горячая клавиша</span>
+      <button id="shortcutBtn" class="ghost">назначить</button>
+    </div>
+
+  </section>
+
+  <section>
+    <h2>Приоритеты типов</h2>
+    <p class="hint">Выше в списке — раньше берётся. Снятая галочка — никогда не брать.
+      Комбо-задача матчится только точным набором чипов: «new shift pti» — отдельный тип;
+      «new shift pti break» не совпадёт ни с чем. Свои типы добавляйте полем ниже.</p>
+    <ul id="priorityList" class="plist"></ul>
+    <div class="addrow">
+      <input type="text" id="newType" placeholder="Добавить тип вручную…">
+      <button id="addTypeBtn" title="Добавить">+</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Чёрный список компаний</h2>
+    <p class="hint">Заявки этих компаний не берутся никогда. Достаточно части
+      названия: «rogue» поймает «ROGUE CARRIER INC». Регистр и лишние пробелы
+      значения не имеют.</p>
+    <ul id="blockedList" class="plist"></ul>
+    <div class="addrow">
+      <input type="text" id="newCompany" placeholder="Название компании…">
+      <button id="addCompanyBtn" title="Добавить в чёрный список">+</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Прочее</h2>
+    <div class="row">
+      <span>Неизвестные типы</span>
+      <!-- Не <select>: системный список рисуется светлым и мимо темы попапа.
+           Разметка ниже — источник данных для initDropdown() в popup.js. -->
+      <div class="dd" id="unknownPolicy" data-value="skip">
+        <button type="button" class="dd-btn" aria-haspopup="listbox" aria-expanded="false">
+          <span class="dd-val"></span>
+          <span class="dd-caret" aria-hidden="true"></span>
+        </button>
+        <ul class="dd-list" role="listbox" tabindex="-1" hidden>
+          <li role="option" data-value="skip">пропускать</li>
+          <li role="option" data-value="grab">брать после известных</li>
+        </ul>
+      </div>
+    </div>
+    <label class="row">
+      <span>Задержка перед кликом, мс</span>
+      <span class="pair">
+        <input type="number" id="delayMin" min="0" max="5000" step="10">
+        <span>–</span>
+        <input type="number" id="delayMax" min="0" max="5000" step="10">
+      </span>
+    </label>
+  </section>
+
+  <section>
+    <h2>Журнал</h2>
+    <div class="loghead">
+      <label class="logfilter">
+        <input type="checkbox" id="logOnlyImportant">
+        <span>только захваты и ошибки</span>
+      </label>
+      <button id="clearLogBtn" class="ghost">Очистить</button>
+    </div>
+    <ul id="logList" class="loglist"></ul>
+  </section>
+
+  <script src="../shared/platform-config.js"></script>
+  <script src="../shared/storage.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

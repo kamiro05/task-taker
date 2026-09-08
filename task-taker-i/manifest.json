@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Task Taker I",
+  "version": "1.0.1",
+  "description": "Мгновенно берёт новые рабочие заявки по приоритетам типов задач, пропуская компании из чёрного списка.",
+  "minimum_chrome_version": "111",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["storage", "scripting"],
+  "host_permissions": ["https://alpha.flowconnect-group.com/*"],
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "commands": {
+    "toggle-capture": {
+      "description": "Включить/выключить захват"
+    }
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "Task Taker I",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://alpha.flowconnect-group.com/*"],
+      "js": ["src/injected/inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://alpha.flowconnect-group.com/*"],
+      "js": [
+        "src/shared/platform-config.js",
+        "src/shared/engine-core.js",
+        "src/shared/storage.js",
+        "src/content/content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}
