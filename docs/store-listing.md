@@ -93,8 +93,7 @@ powershell -ExecutionPolicy Bypass -File tools/fit-screenshot.ps1 снимок.p
    ставится по прямой ссылке (Private — ещё и по списку почт).
 2. **Приватный репозиторий.** Тогда ссылку на политику придётся дать иначе —
    например, отдельным публичным gist только с текстом `PRIVACY.md`.
-3. **Имя репозитория** `flowconnect-task-taker` тоже содержит название. Если
-   переименуете — обновите ссылку на политику ниже.
+3. **Имя репозитория** — `task-taker`, названия платформы в нём нет.
 4. `docs/platform-notes.md` — подробный разбор внутренностей платформы:
    селекторы, имена её API, поведение сервера. Для публичного репозитория это
    самый чувствительный файл.
@@ -156,7 +155,7 @@ powershell -ExecutionPolicy Bypass -File tools/fit-screenshot.ps1 снимок.p
 **Privacy policy URL**
 
 ```
-https://github.com/kamiro05/flowconnect-task-taker/blob/master/PRIVACY.md
+https://github.com/kamiro05/task-taker/blob/master/PRIVACY.md
 ```
 
 Репозиторий должен быть публичным, иначе ссылка не откроется у ревьюера.
