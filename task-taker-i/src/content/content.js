@@ -612,9 +612,17 @@
     if (!armed()) return;
     grabInFlight.add(key);
     try {
-      const banned = blockedCompany(task.row || findRowById(key));
+      const rowNow = task.row || findRowById(key);
+
+      const banned = blockedCompany(rowNow);
       if (banned) {
         log({ event: "skip", id: key, type: task.type, detail: "компания в чёрном списке: " + banned });
+        return;
+      }
+
+      const stopWord = blockedWord(rowNow);
+      if (stopWord) {
+        log({ event: "skip", id: key, type: task.type, detail: "стоп-слово в комментарии: " + stopWord });
         return;
       }
 
@@ -783,20 +791,17 @@
     return cellText(row, C.dom.portalSelector);
   }
 
-  // Чёрный список компаний. Сравнение по вхождению подстроки в нормализованный
-  // текст ячейки: оператор вводит «rogue», и это ловит «ROGUE CARRIER INC» —
-  // точное написание из таблицы помнить не нужно. Возвращает сработавшую
-  // запись, чтобы её было видно в журнале.
+  // Сами правила сопоставления живут в engine-core: там чистая логика без DOM,
+  // и её покрывают тесты. Здесь остаётся только достать текст из строки.
+  function blockedWord(row) {
+    if (state.cfg.wordFilterEnabled === false) return "";
+    return FCT.EngineCore.findBlockedWord(
+      cellText(row, C.dom.commentSelector), state.cfg.blockedWords);
+  }
+
   function blockedCompany(row) {
-    const list = state.cfg.blockedCompanies;
-    if (!Array.isArray(list) || list.length === 0) return "";
-    const company = cellText(row, C.dom.companySelector);
-    if (!company) return "";
-    for (const raw of list) {
-      const needle = norm(raw);
-      if (needle && company.indexOf(needle) !== -1) return raw;
-    }
-    return "";
+    return FCT.EngineCore.findBlockedCompany(
+      cellText(row, C.dom.companySelector), state.cfg.blockedCompanies);
   }
 
   function portalAllowed(p) {

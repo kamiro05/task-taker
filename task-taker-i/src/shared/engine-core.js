@@ -8,6 +8,59 @@ FCT.EngineCore = (function () {
     return (FCT.normalizeType || (x => String(x)))(t);
   }
 
+  const norm = (s) => (FCT.normalizeType || (x => String(x)))(s);
+
+  // ── Фильтры отказа ────────────────────────────────────────────────────────
+  //
+  // Два списка с РАЗНОЙ семантикой совпадения, и разница не косметическая.
+  //
+  // Компании — по вхождению подстроки: оператор пишет «rogue» и ловит
+  // «ROGUE CARRIER INC», не помня точного написания из таблицы.
+  //
+  // Комментарии — по целому слову: это свободный текст, и подстрока «pu»
+  // сработала бы внутри «pick up», а «ne» — внутри «need», «new» и «note».
+  // Пробел внутри записи означает разделитель любой длины, поэтому «pick up»
+  // находит и «pick  up» с переносом строки.
+
+  const RE_SPECIAL = /[.*+?^${}()|[\]\\]/g;
+  const BOUNDARY_L = "(?<![\\p{L}\\p{N}])";
+  const BOUNDARY_R = "(?![\\p{L}\\p{N}])";
+
+  function compileWord(entry) {
+    const needle = norm(entry);
+    if (!needle) return null;
+    const body = needle.replace(RE_SPECIAL, "\\$&").replace(/ /g, "\\s+");
+    try {
+      return new RegExp(BOUNDARY_L + body + BOUNDARY_R, "u");
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Обе функции возвращают сработавшую запись списка (а не true), чтобы её
+  // было видно в журнале: «почему заявку не взяли» — первый вопрос оператора.
+  function findBlockedWord(text, list) {
+    if (!Array.isArray(list) || list.length === 0) return "";
+    const hay = norm(text);
+    if (!hay) return "";
+    for (const raw of list) {
+      const re = compileWord(raw);
+      if (re && re.test(hay)) return raw;
+    }
+    return "";
+  }
+
+  function findBlockedCompany(text, list) {
+    if (!Array.isArray(list) || list.length === 0) return "";
+    const hay = norm(text);
+    if (!hay) return "";
+    for (const raw of list) {
+      const needle = norm(raw);
+      if (needle && hay.indexOf(needle) !== -1) return raw;
+    }
+    return "";
+  }
+
   function priorityIndex(cfg, type) {
     const target = keyOf(type);
     const list = Array.isArray(cfg.priorities) ? cfg.priorities : [];
@@ -87,5 +140,5 @@ FCT.EngineCore = (function () {
     return { submit, flushNow };
   }
 
-  return { createQueue, priorityIndex };
+  return { createQueue, priorityIndex, findBlockedWord, findBlockedCompany };
 })();

@@ -47,6 +47,7 @@ FCT.CONFIG = {
     createDateSelector: ".mat-column-Create-Date",
     portalSelector: ".mat-column-Portal",
     companySelector: ".mat-column-Company",
+    commentSelector: ".mat-column-Comment",
     driverSelector: ".mat-column-Driver---CoDriver",
     executorSelector: ".mat-column-Executor",
     statusTextSelector: ".mat-column-Status .status-text",

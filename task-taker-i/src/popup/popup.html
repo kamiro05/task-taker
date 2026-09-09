@@ -102,6 +102,22 @@
   </section>
 
   <section>
+    <h2>Стоп-слова в комментарии</h2>
+    <label class="row">
+      <span>Фильтр включён</span>
+      <input type="checkbox" id="wordFilterEnabled" class="switch">
+    </label>
+    <p class="hint">Заявка не берётся, если в её комментарии встретилось любое из
+      слов. Совпадение по целому слову: «stop» найдётся в «DRIVER NEED STOP», но
+      не внутри «nonstop». Можно вводить и фразу целиком — «pick up».</p>
+    <ul id="wordList" class="plist"></ul>
+    <div class="addrow">
+      <input type="text" id="newWord" placeholder="Слово или фраза…">
+      <button id="addWordBtn" title="Добавить стоп-слово">+</button>
+    </div>
+  </section>
+
+  <section>
     <h2>Прочее</h2>
     <div class="row">
       <span>Неизвестные типы</span>

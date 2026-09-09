@@ -35,7 +35,10 @@ FCT.DEFAULT_CFG = {
   priorities: [],
   portals: { eld88: true, flow: true },
   // Компании, заявки которых не берутся. Сравнение по вхождению подстроки.
-  blockedCompanies: []
+  blockedCompanies: [],
+  // Стоп-слова в комментарии к заявке и выключатель этого фильтра.
+  blockedWords: [],
+  wordFilterEnabled: true
 };
 
 FCT.MAX_LOGS = 50;
@@ -47,6 +50,7 @@ FCT.loadCfg = async function () {
   cfg.enabled = false;
   if (!Array.isArray(cfg.priorities)) cfg.priorities = [];
   if (!Array.isArray(cfg.blockedCompanies)) cfg.blockedCompanies = [];
+  if (!Array.isArray(cfg.blockedWords)) cfg.blockedWords = [];
   const pdef = FCT.DEFAULT_CFG.portals;
   if (!cfg.portals || typeof cfg.portals !== "object") {
     cfg.portals = Object.assign({}, pdef);

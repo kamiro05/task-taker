@@ -2,7 +2,7 @@
   const $ = (id) => document.getElementById(id);
   let cfg = null;
 
-  const toggleIds = ["dryRun", "activeTabOnly", "soundOnGrab", "showPanel", "logOnlyImportant"];
+  const toggleIds = ["dryRun", "activeTabOnly", "soundOnGrab", "showPanel", "wordFilterEnabled", "logOnlyImportant"];
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   async function init() {
@@ -16,6 +16,7 @@
     $("delayMax").value = cfg.humanDelayMaxMs;
     renderPriorities();
     renderBlocked();
+    renderWords();
     await renderShortcut();
     await renderStats();
     await renderHealth();
@@ -161,7 +162,6 @@
         cfg.priorities.splice(i, 1);
         await save();
         renderPriorities();
-    renderBlocked();
       });
 
       li.append(pos, cb, name, up, down, del);
@@ -205,8 +205,67 @@
     });
   }
 
+  // Стоп-слова живут отдельным списком: у них своя семантика совпадения (по
+  // целому слову) и свой выключатель.
+  function renderWords() {
+    const ul = $("wordList");
+    ul.textContent = "";
+    const list = Array.isArray(cfg.blockedWords) ? cfg.blockedWords : [];
+    if (!list.length) {
+      const li = document.createElement("li");
+      li.className = "empty-row";
+      li.textContent = "список пуст — комментарии не проверяются";
+      ul.appendChild(li);
+      return;
+    }
+    list.forEach((word, i) => {
+      const li = document.createElement("li");
+
+      const tname = document.createElement("span");
+      tname.className = "tname";
+      tname.title = word;
+      tname.textContent = word;
+
+      const del = document.createElement("button");
+      del.textContent = "✕";
+      del.className = "del";
+      del.title = "Убрать стоп-слово";
+      del.addEventListener("click", async () => {
+        cfg.blockedWords.splice(i, 1);
+        await save();
+        renderWords();
+      });
+
+      li.append(tname, del);
+      ul.appendChild(li);
+    });
+  }
+
+  async function addWord(raw) {
+    const word = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
+    if (!word) return;
+    if (!Array.isArray(cfg.blockedWords)) cfg.blockedWords = [];
+    const exists = cfg.blockedWords.some(w => FCT.normalizeType(w) === FCT.normalizeType(word));
+    if (exists) return;
+    cfg.blockedWords.push(word);
+    await save();
+    renderWords();
+  }
+
+  $("addWordBtn").addEventListener("click", async () => {
+    await addWord($("newWord").value);
+    $("newWord").value = "";
+  });
+
+  $("newWord").addEventListener("keydown", async (e) => {
+    if (e.key === "Enter") {
+      await addWord($("newWord").value);
+      $("newWord").value = "";
+    }
+  });
+
   async function addCompany(raw) {
-    const name = String(raw == null ? "" : raw).replace(/s+/g, " ").trim();
+    const name = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
     if (!name) return;
     if (!Array.isArray(cfg.blockedCompanies)) cfg.blockedCompanies = [];
     const exists = cfg.blockedCompanies.some(c => FCT.normalizeType(c) === FCT.normalizeType(name));
@@ -235,7 +294,6 @@
     [arr[i], arr[j]] = [arr[j], arr[i]];
     await save();
     renderPriorities();
-    renderBlocked();
   }
 
   async function addType(raw) {
@@ -245,7 +303,6 @@
     cfg.priorities.push({ type: t, enabled: true });
     await save();
     renderPriorities();
-    renderBlocked();
   }
 
   function fmtTs(ts) {
